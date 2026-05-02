@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Moon, Calendar, Users, CreditCard, ChevronRight, Check, Clock, Crown, Sparkles, AlertCircle, TrendingUp, User, Phone, Mail, Search, X, ArrowLeft, QrCode, Wallet, Video, Star, Megaphone, Shuffle, Eye, EyeOff, Send, Copy, RotateCcw, XCircle, CheckCircle2, AlertTriangle, Bell, Share2, MessageCircle, Link2, Zap } from 'lucide-react';
-
+import { Moon, Calendar, Users, CreditCard, ChevronRight, Check, Clock, Crown, Sparkles, AlertCircle, TrendingUp, User, Phone, Mail, Search, X, ArrowLeft, QrCode, Wallet, Video, Star, Megaphone, Shuffle, Eye, EyeOff, Send, Copy, RotateCcw, XCircle, CheckCircle2, AlertTriangle, Bell, Hash, MessageCircle, Link2, Zap } from 'lucide-react';
+ 
 // ============ サンプルデータ ============
 const SESSIONS_INIT = [
   { id: 1, date: '2026-05-08', day: '金', time: '19:30-22:30', type: '通常会', price: 2000, capacity: 12, gm: '夜霧GM', platform: 'Zoom', meetingUrl: 'https://zoom.us/j/9824517632', isGuest: false, guestName: null, status: 'open' },
@@ -14,7 +14,7 @@ const SESSIONS_INIT = [
   { id: 9, date: '2026-04-25', day: '土', time: '19:00-22:30', type: '限定会', price: 3000, capacity: 10, gm: '黒猫GM', platform: 'Google Meet', meetingUrl: 'https://meet.google.com/abc-defg-hij', isGuest: false, guestName: null, status: 'closed' },
   { id: 10, date: '2026-04-19', day: '日', time: '13:00-17:00', type: 'スーパーゲスト会', price: 4500, capacity: 14, gm: '夜霧GM', platform: 'Zoom', meetingUrl: 'https://zoom.us/j/9182736450', isGuest: true, guestName: '狼月 シン', guestBio: '人狼歴12年のレジェンドプレイヤー', status: 'closed' },
 ];
-
+ 
 // 参加者名簿（セッションごと）
 const PARTICIPANTS_INIT = [
   // 5/8 通常会
@@ -26,7 +26,7 @@ const PARTICIPANTS_INIT = [
   { id: 'p6',  sessionId: 1, customerId: 6, name: '渡辺 さくら', handle: '@sakura_w',      paid: false, paidAt: null,                cancelled: false, refunded: false, role: null },
   { id: 'p7',  sessionId: 1, customerId: 7, name: '山本 龍之介', handle: '@ryu_yama',      paid: true,  paidAt: '2026-05-02 22:19', cancelled: false, refunded: false, role: null },
   { id: 'p8',  sessionId: 1, customerId: 8, name: '中村 葵',     handle: '@aoi_naka',      paid: true,  paidAt: '2026-05-01 07:55', cancelled: false, refunded: false, role: null },
-
+ 
   // 4/28 過去会・支払い実績
   { id: 'p20', sessionId: 8, customerId: 1, name: '佐藤 健',     handle: '@takeru_jinrou', paid: true,  paidAt: '2026-04-26 19:01', cancelled: false, refunded: false, role: '人狼' },
   { id: 'p21', sessionId: 8, customerId: 2, name: '鈴木 美咲',   handle: '@misaki_wolf',  paid: true,  paidAt: '2026-04-27 10:22', cancelled: false, refunded: false, role: '占い師' },
@@ -36,18 +36,18 @@ const PARTICIPANTS_INIT = [
   { id: 'p25', sessionId: 8, customerId: 5, name: '伊藤 大輔',   handle: '@daisuke_i',     paid: true,  paidAt: '2026-04-27 11:00', cancelled: false, refunded: false, role: '霊媒師' },
   { id: 'p26', sessionId: 8, customerId: 8, name: '中村 葵',     handle: '@aoi_naka',      paid: true,  paidAt: '2026-04-26 18:44', cancelled: false, refunded: false, role: '騎士' },
   { id: 'p27', sessionId: 8, customerId: 7, name: '山本 龍之介', handle: '@ryu_yama',      paid: true,  paidAt: '2026-04-27 09:18', cancelled: false, refunded: false, role: '狂人' },
-
+ 
   // 4/25 限定会
   { id: 'p30', sessionId: 9, customerId: 1, name: '佐藤 健',     handle: '@takeru_jinrou', paid: true,  paidAt: '2026-04-22 18:30', cancelled: false, refunded: false, role: '占い師' },
   { id: 'p31', sessionId: 9, customerId: 4, name: '高橋 由美',   handle: '@yumi_taka',    paid: true,  paidAt: '2026-04-22 20:11', cancelled: false, refunded: false, role: '人狼' },
   { id: 'p32', sessionId: 9, customerId: 2, name: '鈴木 美咲',   handle: '@misaki_wolf',  paid: true,  paidAt: '2026-04-23 12:00', cancelled: false, refunded: false, role: '村人' },
   { id: 'p33', sessionId: 9, customerId: 5, name: '伊藤 大輔',   handle: '@daisuke_i',     paid: true,  paidAt: '2026-04-24 09:45', cancelled: false, refunded: false, role: '騎士' },
-
+ 
   // 4/19 ゲスト会
   { id: 'p40', sessionId: 10, customerId: 1, name: '佐藤 健',    handle: '@takeru_jinrou', paid: true, paidAt: '2026-04-15 20:00', cancelled: false, refunded: false, role: '村人' },
   { id: 'p41', sessionId: 10, customerId: 4, name: '高橋 由美',  handle: '@yumi_taka',    paid: true, paidAt: '2026-04-15 21:30', cancelled: false, refunded: false, role: '占い師' },
   { id: 'p42', sessionId: 10, customerId: 2, name: '鈴木 美咲',  handle: '@misaki_wolf',  paid: true, paidAt: '2026-04-16 08:00', cancelled: false, refunded: false, role: '人狼' },
-
+ 
   // 5/9, 5/10, 5/15 など他の今後の会にも参加者を入れておく
   { id: 'p50', sessionId: 2, customerId: 1, name: '佐藤 健',     handle: '@takeru_jinrou', paid: true,  paidAt: '2026-05-01 21:15', cancelled: false, refunded: false, role: null },
   { id: 'p51', sessionId: 2, customerId: 4, name: '高橋 由美',   handle: '@yumi_taka',    paid: true,  paidAt: '2026-04-30 19:00', cancelled: false, refunded: false, role: null },
@@ -55,7 +55,7 @@ const PARTICIPANTS_INIT = [
   { id: 'p53', sessionId: 4, customerId: 2, name: '鈴木 美咲',   handle: '@misaki_wolf',  paid: true,  paidAt: '2026-04-22 14:00', cancelled: false, refunded: false, role: null },
   { id: 'p54', sessionId: 4, customerId: 4, name: '高橋 由美',   handle: '@yumi_taka',    paid: true,  paidAt: '2026-04-22 18:00', cancelled: false, refunded: false, role: null },
 ];
-
+ 
 const CUSTOMERS = [
   { id: 1, name: '佐藤 健', handle: '@takeru_jinrou', phone: '090-xxxx-1234', email: 'takeru@example.com', joined: '2024-03-15', total: 24, lastVisit: '2026-04-28', spent: 84000, tier: 'VIP', favoriteType: '通常会', notes: '初心者にも優しい。占い師経験豊富。', avatar: '佐' },
   { id: 2, name: '鈴木 美咲', handle: '@misaki_wolf', phone: '090-xxxx-5678', email: 'misaki@example.com', joined: '2024-08-02', total: 12, lastVisit: '2026-04-25', spent: 51000, tier: 'レギュラー', favoriteType: '限定会', notes: '占い師ロール大好き。木曜は来られない。', avatar: '鈴' },
@@ -67,7 +67,7 @@ const CUSTOMERS = [
   { id: 8, name: '中村 葵', handle: '@aoi_naka', phone: '090-xxxx-6677', email: 'aoi@example.com', joined: '2025-02-22', total: 9, lastVisit: '2026-04-28', spent: 31500, tier: 'レギュラー', favoriteType: '通常会', notes: '騎士ロール好き。', avatar: '中' },
   { id: 9, name: '小林 翼', handle: '@tsubasa_k', phone: '090-xxxx-8899', email: 'tsubasa@example.com', joined: '2025-05-10', total: 6, lastVisit: '2026-04-15', spent: 21000, tier: '新規', favoriteType: 'ゲスト会', notes: '当日キャンセル歴あり、要注意。', avatar: '小' },
 ];
-
+ 
 const ROLES_BY_PLAYERS = {
   8:  ['人狼', '人狼', '占い師', '霊媒師', '騎士', '村人', '村人', '狂人'],
   9:  ['人狼', '人狼', '占い師', '霊媒師', '騎士', '村人', '村人', '村人', '狂人'],
@@ -77,7 +77,7 @@ const ROLES_BY_PLAYERS = {
   13: ['人狼', '人狼', '人狼', '占い師', '霊媒師', '騎士', '村人', '村人', '村人', '村人', '村人', '村人', '狂人'],
   14: ['人狼', '人狼', '人狼', '占い師', '霊媒師', '騎士', '共有者', '共有者', '村人', '村人', '村人', '村人', '村人', '狂人'],
 };
-
+ 
 const ROLE_STYLES = {
   '人狼':   { color: '#a85c5c', bg: 'rgba(168, 92, 92, 0.18)', team: '人狼陣営' },
   '占い師': { color: '#7da9cb', bg: 'rgba(125, 169, 203, 0.18)', team: '村人陣営' },
@@ -87,7 +87,7 @@ const ROLE_STYLES = {
   '村人':   { color: '#a8a89a', bg: 'rgba(168, 168, 154, 0.15)', team: '村人陣営' },
   '狂人':   { color: '#d97757', bg: 'rgba(217, 119, 87, 0.18)',  team: '人狼陣営' },
 };
-
+ 
 const TYPE_STYLES = {
   '通常会':           { color: '#c9a86a', bg: 'rgba(201, 168, 106, 0.12)', border: 'rgba(201, 168, 106, 0.4)', label: '通常' },
   '限定会':           { color: '#d97757', bg: 'rgba(217, 119, 87, 0.14)',  border: 'rgba(217, 119, 87, 0.45)',  label: '限定' },
@@ -95,19 +95,19 @@ const TYPE_STYLES = {
   'ゲスト会':         { color: '#a85c8b', bg: 'rgba(168, 92, 139, 0.16)',  border: 'rgba(168, 92, 139, 0.5)',   label: 'ゲスト' },
   'スーパーゲスト会': { color: '#e8d18b', bg: 'rgba(232, 209, 139, 0.16)', border: 'rgba(232, 209, 139, 0.55)', label: 'S・ゲスト' },
 };
-
+ 
 const fmtYen = (n) => '¥' + n.toLocaleString('ja-JP');
-
+ 
 // ============ ルートアプリ ============
 export default function App() {
   const [view, setView] = useState('customer');
   const [sessions, setSessions] = useState(SESSIONS_INIT);
   const [participants, setParticipants] = useState(PARTICIPANTS_INIT);
-
+ 
   const updateParticipant = (id, patch) => {
     setParticipants(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
   };
-
+ 
   return (
     <div style={{
       minHeight: '100vh',
@@ -132,7 +132,7 @@ export default function App() {
         .shimmer { background: linear-gradient(90deg, transparent, rgba(201,168,106,0.15), transparent); background-size: 200% 100%; animation: shimmer 3s ease-in-out infinite; }
       `}</style>
       <div className="grain" />
-
+ 
       <header style={{
         position: 'sticky', top: 0, zIndex: 50,
         backdropFilter: 'blur(20px)',
@@ -159,7 +159,7 @@ export default function App() {
             </div>
           </div>
         </div>
-
+ 
         <div style={{
           display: 'flex',
           background: 'rgba(255,255,255,0.03)',
@@ -179,7 +179,7 @@ export default function App() {
           ))}
         </div>
       </header>
-
+ 
       <main style={{ position: 'relative', zIndex: 2 }}>
         {view === 'customer'
           ? <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} />
@@ -189,7 +189,7 @@ export default function App() {
     </div>
   );
 }
-
+ 
 // =============================================================
 // 参加者側
 // =============================================================
@@ -198,23 +198,23 @@ function CustomerView({ sessions, participants, updateParticipant }) {
   const [selected, setSelected] = useState(null);
   const [filter, setFilter] = useState('all');
   const [announcementsOpen, setAnnouncementsOpen] = useState(false);
-
+ 
   const ME_ID = 1; // 視点：佐藤 健
   const upcoming = sessions.filter(s => s.status === 'open');
   const guestSessions = upcoming.filter(s => s.isGuest);
   const filtered = useMemo(() => filter === 'all' ? upcoming : upcoming.filter(s => s.type === filter), [filter, upcoming]);
-
+ 
   // 自分の参加情報を取得
   const myBookings = participants.filter(p => p.customerId === ME_ID);
   const bookedSessionIds = new Set(myBookings.filter(b => !b.cancelled).map(b => b.sessionId));
-
+ 
   const getMyParticipant = (sessionId) => participants.find(p => p.sessionId === sessionId && p.customerId === ME_ID);
-
+ 
   if (step === 'mypage') return <MyPage onBack={() => setStep('list')} sessions={sessions} participants={participants} myId={ME_ID} updateParticipant={updateParticipant} />;
   if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => setStep('done')} />;
   if (step === 'done' && selected) return <BookingDone session={selected} onHome={() => { setStep('list'); setSelected(null); }} />;
   if (step === 'detail' && selected) return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => setStep('confirm')} myParticipant={getMyParticipant(selected.id)} />;
-
+ 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '40px 32px 80px' }}>
       {/* ヒーロー */}
@@ -246,7 +246,7 @@ function CustomerView({ sessions, participants, updateParticipant }) {
           会の予約から詳細の確認、お支払いまで。<br />
           このページひとつで、すべて完結します。
         </p>
-
+ 
         <div style={{ display: 'flex', gap: 12, marginTop: 28, flexWrap: 'wrap' }}>
           <button onClick={() => setStep('mypage')} style={{
             padding: '12px 22px', background: 'rgba(255,255,255,0.04)',
@@ -269,7 +269,7 @@ function CustomerView({ sessions, participants, updateParticipant }) {
           </button>
         </div>
       </section>
-
+ 
       {/* 今月のゲスト */}
       {guestSessions.length > 0 && (
         <section className="fadeup" style={{
@@ -326,7 +326,7 @@ function CustomerView({ sessions, participants, updateParticipant }) {
           </div>
         </section>
       )}
-
+ 
       {/* フィルタ */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 16 }}>
         <h2 className="display" style={{ fontSize: 14, letterSpacing: '0.3em', color: 'rgba(232,227,216,0.85)', margin: 0, fontWeight: 500 }}>
@@ -344,7 +344,7 @@ function CustomerView({ sessions, participants, updateParticipant }) {
           ))}
         </div>
       </div>
-
+ 
       {/* セッション一覧 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
         {filtered.map((s, i) => {
@@ -354,7 +354,7 @@ function CustomerView({ sessions, participants, updateParticipant }) {
           const isFull = remaining === 0;
           const isLow = remaining <= 3 && !isFull;
           const isBooked = bookedSessionIds.has(s.id);
-
+ 
           return (
             <article key={s.id} className="fadeup" onClick={() => { setSelected(s); setStep('detail'); }}
               style={{
@@ -369,7 +369,7 @@ function CustomerView({ sessions, participants, updateParticipant }) {
               onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.borderColor = isBooked ? '#c9a86a' : ts.border; }}
             >
               <div style={{ position: 'absolute', top: 0, left: 0, width: 4, height: '100%', background: ts.color }} />
-
+ 
               {isBooked && (
                 <div style={{
                   position: 'absolute', top: 14, right: 14,
@@ -381,7 +381,7 @@ function CustomerView({ sessions, participants, updateParticipant }) {
                   <CheckCircle2 size={10} /> 予約済
                 </div>
               )}
-
+ 
               <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, marginTop: isBooked ? 16 : 0 }}>
                 <div>
                   <div className="num" style={{ fontSize: 28, color: '#e8e3d8', fontWeight: 500, lineHeight: 1 }}>
@@ -400,7 +400,7 @@ function CustomerView({ sessions, participants, updateParticipant }) {
                   }}>{s.type}</span>
                 )}
               </header>
-
+ 
               <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 14 }}>
                 {s.isGuest && (
                   <div style={{ fontSize: 11, color: '#a85c8b', display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5, fontWeight: 600 }}>
@@ -414,7 +414,7 @@ function CustomerView({ sessions, participants, updateParticipant }) {
                   <Video size={10} /> {s.platform}
                 </div>
               </div>
-
+ 
               <footer style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 18, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
                 <div>
                   <div className="num" style={{ fontSize: 22, color: '#c9a86a', fontWeight: 500 }}>{fmtYen(s.price)}</div>
@@ -437,12 +437,12 @@ function CustomerView({ sessions, participants, updateParticipant }) {
           );
         })}
       </div>
-
+ 
       {announcementsOpen && <AnnouncementModal onClose={() => setAnnouncementsOpen(false)} />}
     </div>
   );
 }
-
+ 
 // ============ お知らせモーダル（参加者側）============
 function AnnouncementModal({ onClose }) {
   const items = [
@@ -450,7 +450,7 @@ function AnnouncementModal({ onClose }) {
     { type: 'remind', date: '5月1日', title: '5/8 通常会 開催3日前のリマインド', body: 'Zoomリンクは当日18時に再送します。お役職カードの確認はマイページから。' },
     { type: 'info', date: '4月30日', title: 'GW期間の予約受付について', body: '5/3-5/6 はお休みです。5/8 から通常通り開催します。' },
   ];
-
+ 
   return (
     <div onClick={onClose} style={{
       position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.7)',
@@ -491,14 +491,14 @@ function AnnouncementModal({ onClose }) {
     </div>
   );
 }
-
+ 
 // ============ セッション詳細（参加者側）============
 function SessionDetail({ session, onBack, onBook, myParticipant }) {
   const ts = TYPE_STYLES[session.type];
   const isAlreadyBooked = myParticipant && !myParticipant.cancelled;
   const role = myParticipant?.role;
   const isPaid = myParticipant?.paid;
-
+ 
   return (
     <div className="fadeup" style={{ maxWidth: 760, margin: '0 auto', padding: '40px 32px 80px' }}>
       <button onClick={onBack} style={{
@@ -506,7 +506,7 @@ function SessionDetail({ session, onBack, onBook, myParticipant }) {
         cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, letterSpacing: '0.15em',
         display: 'flex', alignItems: 'center', gap: 6, marginBottom: 28, padding: 0,
       }}><ArrowLeft size={14} /> 一覧へ</button>
-
+ 
       <div style={{
         position: 'relative', padding: '40px 36px',
         background: 'linear-gradient(135deg, rgba(40, 25, 30, 0.5) 0%, rgba(20, 15, 25, 0.3) 100%)',
@@ -516,7 +516,7 @@ function SessionDetail({ session, onBack, onBook, myParticipant }) {
           position: 'absolute', top: -60, right: -60, width: 200, height: 200, borderRadius: '50%',
           background: `radial-gradient(circle, ${ts.bg} 0%, transparent 70%)`,
         }} />
-
+ 
         <span style={{
           display: 'inline-block', padding: '5px 12px', fontSize: 10, letterSpacing: '0.25em',
           background: ts.bg, color: ts.color, borderRadius: 2, border: `1px solid ${ts.border}`,
@@ -524,7 +524,7 @@ function SessionDetail({ session, onBack, onBook, myParticipant }) {
         }}>
           {session.type}
         </span>
-
+ 
         <h2 className="display" style={{
           fontSize: 36, margin: '0 0 8px', fontWeight: 700, lineHeight: 1.2,
           background: 'linear-gradient(180deg, #f4ead0 0%, #c9a86a 100%)',
@@ -535,7 +535,7 @@ function SessionDetail({ session, onBack, onBook, myParticipant }) {
         <div className="num" style={{ fontSize: 16, color: 'rgba(232,227,216,0.7)', marginBottom: 32 }}>
           {session.time}
         </div>
-
+ 
         {/* ゲスト紹介 */}
         {session.isGuest && (
           <div style={{
@@ -561,14 +561,14 @@ function SessionDetail({ session, onBack, onBook, myParticipant }) {
             </div>
           </div>
         )}
-
+ 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 28 }}>
           <Detail icon={<Crown size={14} />} label="GM" value={session.gm} />
           <Detail icon={<Video size={14} />} label="プラットフォーム" value={session.platform} />
           <Detail icon={<Users size={14} />} label="定員" value={`${session.capacity}名`} />
           <Detail icon={<CreditCard size={14} />} label="参加費" value={fmtYen(session.price)} />
         </div>
-
+ 
         {/* 予約済の場合の情報 */}
         {isAlreadyBooked && (
           <>
@@ -599,10 +599,10 @@ function SessionDetail({ session, onBack, onBook, myParticipant }) {
                 ※ 開始30分前から入室可能です
               </div>
             </div>
-
+ 
             {/* 役職カード */}
             <RoleCard role={role} sessionDate={session.date} />
-
+ 
             {/* 支払いステータス */}
             <div style={{
               padding: '14px 18px', marginBottom: 12, borderRadius: 3,
@@ -629,12 +629,12 @@ function SessionDetail({ session, onBack, onBook, myParticipant }) {
                 }}>支払う</button>
               )}
             </div>
-
+ 
             {/* キャンセル */}
             <CancelSection session={session} myParticipant={myParticipant} />
           </>
         )}
-
+ 
         {/* 予約していない場合の説明＋ボタン */}
         {!isAlreadyBooked && (
           <>
@@ -646,7 +646,7 @@ function SessionDetail({ session, onBack, onBook, myParticipant }) {
               長考型のシナリオを中心に、参加者全員で深く楽しむ会です。<br />
               初心者の方には会前にルール説明の時間を設けます。
             </div>
-
+ 
             {/* キャンセルポリシー */}
             <div style={{
               padding: '12px 16px', marginBottom: 24, borderRadius: 2,
@@ -658,7 +658,7 @@ function SessionDetail({ session, onBack, onBook, myParticipant }) {
               </div>
               前日23:59まで：全額返金 / 当日キャンセル：返金不可
             </div>
-
+ 
             <button onClick={onBook} className="pulse-glow" style={{
               width: '100%', padding: '16px',
               background: 'linear-gradient(135deg, #c9a86a 0%, #a8895a 100%)',
@@ -674,11 +674,11 @@ function SessionDetail({ session, onBack, onBook, myParticipant }) {
     </div>
   );
 }
-
+ 
 // ============ 役職カード ============
 function RoleCard({ role, sessionDate }) {
   const [revealed, setRevealed] = useState(false);
-
+ 
   if (!role) {
     return (
       <div style={{
@@ -691,9 +691,9 @@ function RoleCard({ role, sessionDate }) {
       </div>
     );
   }
-
+ 
   const rs = ROLE_STYLES[role];
-
+ 
   return (
     <div style={{
       padding: '20px 22px', marginBottom: 16, borderRadius: 3,
@@ -720,7 +720,7 @@ function RoleCard({ role, sessionDate }) {
           {revealed ? <><EyeOff size={11} /> 隠す</> : <><Eye size={11} /> 開く</>}
         </button>
       </div>
-
+ 
       {revealed ? (
         <div style={{ textAlign: 'center', padding: '8px 0 0' }}>
           <div className="display" style={{ fontSize: 36, color: rs.color, fontWeight: 700, marginBottom: 4 }}>
@@ -738,15 +738,15 @@ function RoleCard({ role, sessionDate }) {
     </div>
   );
 }
-
+ 
 // ============ キャンセル処理 ============
 function CancelSection({ session, myParticipant }) {
   const [confirming, setConfirming] = useState(false);
-
+ 
   // 当日かどうか判定（簡易：日付文字列比較）
   const isToday = session.date === '2026-05-02'; // デモ用：今日が5/2と仮定
   const refundable = !isToday;
-
+ 
   if (myParticipant.cancelled) {
     return (
       <div style={{
@@ -762,7 +762,7 @@ function CancelSection({ session, myParticipant }) {
       </div>
     );
   }
-
+ 
   if (confirming) {
     return (
       <div style={{
@@ -793,7 +793,7 @@ function CancelSection({ session, myParticipant }) {
       </div>
     );
   }
-
+ 
   return (
     <button onClick={() => setConfirming(true)} style={{
       width: '100%', padding: '12px',
@@ -806,7 +806,7 @@ function CancelSection({ session, myParticipant }) {
     </button>
   );
 }
-
+ 
 function Detail({ icon, label, value }) {
   return (
     <div>
@@ -817,7 +817,7 @@ function Detail({ icon, label, value }) {
     </div>
   );
 }
-
+ 
 // ============ 予約確認 / PayPay ============
 function ConfirmBooking({ session, onBack, onDone }) {
   const [step, setStep] = useState('form');
@@ -825,7 +825,7 @@ function ConfirmBooking({ session, onBack, onDone }) {
   const [handle, setHandle] = useState('@takeru_jinrou');
   const [note, setNote] = useState('');
   const ts = TYPE_STYLES[session.type];
-
+ 
   if (step === 'pay') {
     return (
       <div className="fadeup" style={{ maxWidth: 480, margin: '0 auto', padding: '40px 32px 80px' }}>
@@ -863,7 +863,7 @@ function ConfirmBooking({ session, onBack, onDone }) {
       </div>
     );
   }
-
+ 
   return (
     <div className="fadeup" style={{ maxWidth: 560, margin: '0 auto', padding: '40px 32px 80px' }}>
       <button onClick={onBack} style={{
@@ -871,9 +871,9 @@ function ConfirmBooking({ session, onBack, onDone }) {
         cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, letterSpacing: '0.15em',
         display: 'flex', alignItems: 'center', gap: 6, marginBottom: 28, padding: 0,
       }}><ArrowLeft size={14} /> 詳細へ</button>
-
+ 
       <h2 className="display" style={{ fontSize: 28, color: '#c9a86a', letterSpacing: '0.15em', marginBottom: 8 }}>予約内容の確認</h2>
-
+ 
       <div style={{
         padding: 20, marginTop: 24, marginBottom: 28,
         background: 'rgba(255,255,255,0.025)',
@@ -892,11 +892,11 @@ function ConfirmBooking({ session, onBack, onDone }) {
           <span className="num" style={{ fontSize: 22, color: '#c9a86a' }}>{fmtYen(session.price)}</span>
         </div>
       </div>
-
+ 
       <Field label="お名前"><input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} /></Field>
-      <Field label="X / Twitter ID"><input value={handle} onChange={(e) => setHandle(e.target.value)} style={inputStyle} /></Field>
+      <Field label="X / Hash ID"><input value={handle} onChange={(e) => setHandle(e.target.value)} style={inputStyle} /></Field>
       <Field label="伝言（任意）"><textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} placeholder="例：初参加です。よろしくお願いします。" /></Field>
-
+ 
       <button onClick={() => setStep('pay')} style={{
         width: '100%', marginTop: 12, padding: '16px',
         background: 'linear-gradient(135deg, #c9a86a 0%, #a8895a 100%)',
@@ -907,7 +907,7 @@ function ConfirmBooking({ session, onBack, onDone }) {
     </div>
   );
 }
-
+ 
 const inputStyle = {
   width: '100%', padding: '12px 14px',
   background: 'rgba(255,255,255,0.04)',
@@ -915,7 +915,7 @@ const inputStyle = {
   borderRadius: 2, color: '#e8e3d8',
   fontFamily: 'inherit', fontSize: 13, outline: 'none',
 };
-
+ 
 function Field({ label, children }) {
   return (
     <div style={{ marginBottom: 16 }}>
@@ -924,7 +924,7 @@ function Field({ label, children }) {
     </div>
   );
 }
-
+ 
 function BookingDone({ session, onHome }) {
   return (
     <div className="fadeup" style={{ maxWidth: 520, margin: '0 auto', padding: '60px 32px 80px', textAlign: 'center' }}>
@@ -951,13 +951,13 @@ function BookingDone({ session, onHome }) {
     </div>
   );
 }
-
+ 
 // ============ マイページ ============
 function MyPage({ onBack, sessions, participants, myId }) {
   const me = CUSTOMERS.find(c => c.id === myId);
   const myUpcoming = participants.filter(p => p.customerId === myId && !p.cancelled).map(p => ({ ...p, session: sessions.find(s => s.id === p.sessionId) })).filter(x => x.session?.status === 'open');
   const myHistory = participants.filter(p => p.customerId === myId).map(p => ({ ...p, session: sessions.find(s => s.id === p.sessionId) })).filter(x => x.session?.status === 'closed');
-
+ 
   return (
     <div className="fadeup" style={{ maxWidth: 900, margin: '0 auto', padding: '40px 32px 80px' }}>
       <button onClick={onBack} style={{
@@ -965,7 +965,7 @@ function MyPage({ onBack, sessions, participants, myId }) {
         cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, letterSpacing: '0.15em',
         display: 'flex', alignItems: 'center', gap: 6, marginBottom: 28, padding: 0,
       }}><ArrowLeft size={14} /> ホーム</button>
-
+ 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 24, marginBottom: 32 }}>
         <div style={{
           padding: 28, background: 'linear-gradient(180deg, rgba(201,168,106,0.08), rgba(201,168,106,0.02))',
@@ -991,7 +991,7 @@ function MyPage({ onBack, sessions, participants, myId }) {
           <Stat label="お気に入り" value={me.favoriteType} small />
         </div>
       </div>
-
+ 
       {/* 今後の予約 */}
       <h3 className="display" style={{ fontSize: 13, letterSpacing: '0.3em', color: 'rgba(232,227,216,0.7)', marginBottom: 16, fontWeight: 500 }}>── 今後の予約</h3>
       <div style={{ display: 'grid', gap: 10, marginBottom: 32 }}>
@@ -1024,7 +1024,7 @@ function MyPage({ onBack, sessions, participants, myId }) {
           );
         })}
       </div>
-
+ 
       {/* 参加履歴 */}
       <h3 className="display" style={{ fontSize: 13, letterSpacing: '0.3em', color: 'rgba(232,227,216,0.7)', marginBottom: 16, fontWeight: 500 }}>── 参加履歴</h3>
       <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
@@ -1058,7 +1058,7 @@ function MyPage({ onBack, sessions, participants, myId }) {
     </div>
   );
 }
-
+ 
 function Stat({ label, value, unit, small }) {
   return (
     <div style={{
@@ -1072,7 +1072,7 @@ function Stat({ label, value, unit, small }) {
     </div>
   );
 }
-
+ 
 // =============================================================
 // 管理者側
 // =============================================================
@@ -1080,11 +1080,11 @@ function AdminView({ sessions, participants, setParticipants }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
-
+ 
   const updateParticipant = (id, patch) => {
     setParticipants(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
   };
-
+ 
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '32px 32px 80px' }}>
       <div style={{ display: 'flex', gap: 4, marginBottom: 32, borderBottom: '1px solid rgba(255,255,255,0.06)', overflowX: 'auto' }}>
@@ -1111,7 +1111,7 @@ function AdminView({ sessions, participants, setParticipants }) {
           );
         })}
       </div>
-
+ 
       {tab === 'dashboard' && <Dashboard sessions={sessions} participants={participants} />}
       {tab === 'sessions' && <SessionsAdmin sessions={sessions} participants={participants} />}
       {tab === 'payments' && <PaymentsAdmin sessions={sessions} participants={participants} updateParticipant={updateParticipant} />}
@@ -1125,7 +1125,7 @@ function AdminView({ sessions, participants, setParticipants }) {
     </div>
   );
 }
-
+ 
 // ============ ダッシュボード ============
 function Dashboard({ sessions, participants }) {
   const upcoming = sessions.filter(s => s.status === 'open');
@@ -1136,7 +1136,7 @@ function Dashboard({ sessions, participants }) {
   const totalBookings = participants.filter(p => upcoming.some(s => s.id === p.sessionId) && !p.cancelled).length;
   const unpaid = participants.filter(p => upcoming.some(s => s.id === p.sessionId) && !p.cancelled && !p.paid).length;
   const refundsDue = participants.filter(p => p.cancelled && !p.refunded && p.paid).length;
-
+ 
   return (
     <div className="fadeup">
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 36 }}>
@@ -1145,7 +1145,7 @@ function Dashboard({ sessions, participants }) {
         <KPI label="未払い件数" value={`${unpaid}件`} accent="#d97757" />
         <KPI label="返金処理待ち" value={`${refundsDue}件`} accent="#a85c5c" />
       </div>
-
+ 
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 24 }}>
         <section style={{ padding: 24, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3 }}>
           <h3 className="display" style={{ fontSize: 13, letterSpacing: '0.3em', color: 'rgba(232,227,216,0.8)', margin: '0 0 20px', fontWeight: 500 }}>
@@ -1177,7 +1177,7 @@ function Dashboard({ sessions, participants }) {
             );
           })}
         </section>
-
+ 
         <section style={{ padding: 24, background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3 }}>
           <h3 className="display" style={{ fontSize: 13, letterSpacing: '0.3em', color: 'rgba(232,227,216,0.8)', margin: '0 0 20px', fontWeight: 500 }}>
             ── 要対応アラート
@@ -1195,7 +1195,7 @@ function Dashboard({ sessions, participants }) {
     </div>
   );
 }
-
+ 
 function AlertItem({ icon, color, title, body }) {
   return (
     <div style={{ padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
@@ -1206,7 +1206,7 @@ function AlertItem({ icon, color, title, body }) {
     </div>
   );
 }
-
+ 
 function KPI({ label, value, accent }) {
   return (
     <div style={{
@@ -1221,7 +1221,7 @@ function KPI({ label, value, accent }) {
     </div>
   );
 }
-
+ 
 // ============ 会の管理 ============
 function SessionsAdmin({ sessions, participants }) {
   return (
@@ -1235,7 +1235,7 @@ function SessionsAdmin({ sessions, participants }) {
           fontSize: 11, letterSpacing: '0.25em',
         }}>+ 新しい会を作成</button>
       </div>
-
+ 
       <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'auto' }}>
         <div style={{
           display: 'grid', gridTemplateColumns: '110px 80px 90px 1fr 110px 90px 100px 80px',
@@ -1289,13 +1289,13 @@ function SessionsAdmin({ sessions, participants }) {
     </div>
   );
 }
-
+ 
 // ============ 参加者・支払いタブ（NEW）============
 function PaymentsAdmin({ sessions, participants, updateParticipant }) {
   const monthSessions = sessions.filter(s => s.date.startsWith('2026-05') || s.date.startsWith('2026-04'));
   const [expandedId, setExpandedId] = useState(monthSessions[0]?.id || null);
   const [filter, setFilter] = useState('all'); // all | unpaid | refund
-
+ 
   const summary = useMemo(() => {
     let totalCollected = 0, totalUnpaid = 0, totalRefundDue = 0, totalRefunded = 0;
     monthSessions.forEach(s => {
@@ -1308,11 +1308,11 @@ function PaymentsAdmin({ sessions, participants, updateParticipant }) {
     });
     return { totalCollected, totalUnpaid, totalRefundDue, totalRefunded };
   }, [monthSessions, participants]);
-
+ 
   return (
     <div className="fadeup">
       <h3 className="display" style={{ fontSize: 14, letterSpacing: '0.3em', color: 'rgba(232,227,216,0.8)', margin: '0 0 24px', fontWeight: 500 }}>── 参加者・支払い管理（今月）</h3>
-
+ 
       {/* サマリ */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 28 }}>
         <KPI label="入金済" value={fmtYen(summary.totalCollected)} accent="#7da87d" />
@@ -1320,7 +1320,7 @@ function PaymentsAdmin({ sessions, participants, updateParticipant }) {
         <KPI label="返金待ち" value={fmtYen(summary.totalRefundDue)} accent="#a85c5c" />
         <KPI label="返金済" value={fmtYen(summary.totalRefunded)} accent="rgba(232,227,216,0.4)" />
       </div>
-
+ 
       {/* フィルタ */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
         {[
@@ -1337,7 +1337,7 @@ function PaymentsAdmin({ sessions, participants, updateParticipant }) {
           }}>{f.label}</button>
         ))}
       </div>
-
+ 
       {/* セッションごとのアコーディオン */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {monthSessions.map(s => {
@@ -1345,14 +1345,14 @@ function PaymentsAdmin({ sessions, participants, updateParticipant }) {
           if (filter === 'unpaid') sessionParts = sessionParts.filter(p => !p.paid && !p.cancelled);
           if (filter === 'refund') sessionParts = sessionParts.filter(p => p.cancelled && p.paid && !p.refunded);
           if (sessionParts.length === 0 && filter !== 'all') return null;
-
+ 
           const ts = TYPE_STYLES[s.type];
           const isOpen = expandedId === s.id;
           const totalParts = participants.filter(p => p.sessionId === s.id);
           const paidCount = totalParts.filter(p => p.paid && !p.cancelled).length;
           const unpaidCount = totalParts.filter(p => !p.paid && !p.cancelled).length;
           const refundDueCount = totalParts.filter(p => p.cancelled && p.paid && !p.refunded).length;
-
+ 
           return (
             <div key={s.id} style={{
               background: 'rgba(255,255,255,0.025)',
@@ -1373,7 +1373,7 @@ function PaymentsAdmin({ sessions, participants, updateParticipant }) {
                 <Pill color="#a85c5c" label={`返金 ${refundDueCount}`} dimmed={refundDueCount === 0} />
                 <ChevronRight size={16} color="rgba(232,227,216,0.4)" style={{ transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
               </div>
-
+ 
               {isOpen && (
                 <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                   <div style={{
@@ -1399,7 +1399,7 @@ function PaymentsAdmin({ sessions, participants, updateParticipant }) {
     </div>
   );
 }
-
+ 
 function Pill({ color, label, dimmed }) {
   return (
     <span style={{
@@ -1411,7 +1411,7 @@ function Pill({ color, label, dimmed }) {
     }}>{label}</span>
   );
 }
-
+ 
 function ParticipantRow({ idx, participant, session, updateParticipant }) {
   const p = participant;
   let statusColor, statusLabel, statusIcon;
@@ -1420,9 +1420,9 @@ function ParticipantRow({ idx, participant, session, updateParticipant }) {
   else if (p.cancelled && !p.paid) { statusColor = 'rgba(232,227,216,0.3)'; statusLabel = 'キャンセル'; statusIcon = <XCircle size={11} />; }
   else if (p.paid) { statusColor = '#7da87d'; statusLabel = '支払済'; statusIcon = <CheckCircle2 size={11} />; }
   else { statusColor = '#d97757'; statusLabel = '未払い'; statusIcon = <AlertCircle size={11} />; }
-
+ 
   const rs = p.role ? ROLE_STYLES[p.role] : null;
-
+ 
   return (
     <div style={{
       padding: '12px 20px', display: 'grid',
@@ -1483,7 +1483,7 @@ function ParticipantRow({ idx, participant, session, updateParticipant }) {
     </div>
   );
 }
-
+ 
 // ============ 役職割り振り（一覧）============
 function RolesList({ sessions, participants, onSelect }) {
   const upcoming = sessions.filter(s => s.status === 'open');
@@ -1533,14 +1533,14 @@ function RolesList({ sessions, participants, onSelect }) {
     </div>
   );
 }
-
+ 
 // ============ 役職割り振り（詳細）============
 function RoleAssignment({ session, participants, updateParticipant, onBack, setParticipants }) {
   const [mode, setMode] = useState('manual'); // manual | random
   const sParts = participants.filter(p => p.sessionId === session.id && !p.cancelled);
   const ts = TYPE_STYLES[session.type];
   const roleSet = ROLES_BY_PLAYERS[sParts.length] || ROLES_BY_PLAYERS[12];
-
+ 
   // 残り役職を計算
   const usedRoles = sParts.filter(p => p.role).map(p => p.role);
   const availableRoles = useMemo(() => {
@@ -1551,7 +1551,7 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
     });
     return remaining;
   }, [roleSet, usedRoles]);
-
+ 
   const handleRandomAssign = () => {
     const shuffled = [...roleSet].sort(() => Math.random() - 0.5);
     setParticipants(prev => prev.map(p => {
@@ -1560,15 +1560,15 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
       return { ...p, role: shuffled[idx] || null };
     }));
   };
-
+ 
   const handleClearAll = () => {
     setParticipants(prev => prev.map(p => p.sessionId === session.id ? { ...p, role: null } : p));
   };
-
+ 
   const handleManualSet = (participantId, role) => {
     updateParticipant(participantId, { role });
   };
-
+ 
   return (
     <div className="fadeup">
       <button onClick={onBack} style={{
@@ -1576,7 +1576,7 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
         cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, letterSpacing: '0.15em',
         display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24, padding: 0,
       }}><ArrowLeft size={14} /> 一覧へ</button>
-
+ 
       <div style={{
         padding: '24px 28px', marginBottom: 24,
         background: `linear-gradient(135deg, ${ts.bg}, rgba(20,15,25,0.4))`,
@@ -1590,7 +1590,7 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
             </h3>
             <div style={{ fontSize: 12, color: 'rgba(232,227,216,0.6)' }}>{session.gm} · 参加 {sParts.length}名</div>
           </div>
-
+ 
           {/* モード切替 */}
           <div style={{
             display: 'flex',
@@ -1615,7 +1615,7 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
           </div>
         </div>
       </div>
-
+ 
       {/* 役職構成プレビュー */}
       <div style={{
         padding: '16px 20px', marginBottom: 16,
@@ -1637,7 +1637,7 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
           })}
         </div>
       </div>
-
+ 
       {/* ランダム or 手動操作 */}
       {mode === 'random' ? (
         <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
@@ -1662,7 +1662,7 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
           各参加者の役職欄から手動で選択してください。残り役職は自動表示されます。
         </div>
       )}
-
+ 
       {/* 参加者リスト＋役職セレクタ */}
       <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
         {sParts.map((p, i) => {
@@ -1713,7 +1713,7 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
           );
         })}
       </div>
-
+ 
       {/* 確定して通知 */}
       <button style={{
         width: '100%', marginTop: 20, padding: '16px',
@@ -1731,26 +1731,26 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
     </div>
   );
 }
-
+ 
 // ============ 告知センター（NEW）============
 function AnnouncementCenter({ sessions, participants }) {
   const [target, setTarget] = useState(sessions.find(s => s.status === 'open')?.id);
   const targetSession = sessions.find(s => s.id === target);
   const [tab, setTab] = useState('compose'); // compose | history
   const upcoming = sessions.filter(s => s.status === 'open');
-
+ 
   const xPost = targetSession ? generateXPost(targetSession) : '';
   const linePost = targetSession ? generateLinePost(targetSession) : '';
-
+ 
   const targetCount = targetSession ? participants.filter(p => p.sessionId === targetSession.id && !p.cancelled).length : 0;
-
+ 
   return (
     <div className="fadeup">
       <h3 className="display" style={{ fontSize: 14, letterSpacing: '0.3em', color: 'rgba(232,227,216,0.8)', margin: '0 0 8px', fontWeight: 500 }}>── 告知センター</h3>
       <p style={{ fontSize: 11, color: 'rgba(232,227,216,0.5)', marginBottom: 24, lineHeight: 1.7 }}>
         会の告知・リマインドを一箇所から発信。アプリ内お知らせ／一斉メッセージ／X投稿文の自動生成、すべて揃えています。
       </p>
-
+ 
       {/* タブ */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 24 }}>
         {[
@@ -1767,7 +1767,7 @@ function AnnouncementCenter({ sessions, participants }) {
           }}>{t.label}</button>
         ))}
       </div>
-
+ 
       {tab === 'compose' && targetSession && (
         <>
           {/* 対象選択 */}
@@ -1787,7 +1787,7 @@ function AnnouncementCenter({ sessions, participants }) {
               ))}
             </select>
           </div>
-
+ 
           {/* 4つのチャネル */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16, marginBottom: 16 }}>
             {/* アプリ内お知らせ */}
@@ -1810,9 +1810,9 @@ function AnnouncementCenter({ sessions, participants }) {
             />
             {/* X投稿生成 */}
             <ChannelCard
-              icon={<Twitter size={14} />}
+              icon={<Hash size={14} />}
               color="#a85c8b"
-              title="X（Twitter）投稿"
+              title="X（Hash）投稿"
               audience="自動生成 → コピーして投稿"
               cta="文面をコピー"
               hint="新規募集の集客に。"
@@ -1828,7 +1828,7 @@ function AnnouncementCenter({ sessions, participants }) {
               hint="一度設定すれば毎回自動で配信。"
             />
           </div>
-
+ 
           {/* プレビューエリア */}
           <div style={{
             padding: 24, background: 'rgba(255,255,255,0.02)',
@@ -1838,13 +1838,13 @@ function AnnouncementCenter({ sessions, participants }) {
               ── 自動生成プレビュー
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <PreviewBox icon={<Twitter size={12} />} label="X投稿文" color="#a85c8b" content={xPost} />
+              <PreviewBox icon={<Hash size={12} />} label="X投稿文" color="#a85c8b" content={xPost} />
               <PreviewBox icon={<MessageCircle size={12} />} label="LINE / メール文面" color="#7da9cb" content={linePost} />
             </div>
           </div>
         </>
       )}
-
+ 
       {tab === 'history' && (
         <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
           {[
@@ -1873,7 +1873,7 @@ function AnnouncementCenter({ sessions, participants }) {
     </div>
   );
 }
-
+ 
 function ChannelCard({ icon, color, title, audience, cta, hint, copyText }) {
   const [copied, setCopied] = useState(false);
   const handleClick = () => {
@@ -1907,7 +1907,7 @@ function ChannelCard({ icon, color, title, audience, cta, hint, copyText }) {
     </div>
   );
 }
-
+ 
 function PreviewBox({ icon, label, color, content }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -1936,50 +1936,50 @@ function PreviewBox({ icon, label, color, content }) {
     </div>
   );
 }
-
+ 
 function generateXPost(s) {
   const guestLine = s.isGuest ? `\n🌙 SPECIAL GUEST: ${s.guestName}` : '';
   return `【${s.date.slice(5).replace('-', '/')}（${s.day}）${s.time} 開催】
 ${s.type}${guestLine}
-
+ 
 参加費: ${fmtYen(s.price)}（PayPay対応）
 定員: ${s.capacity}名
 プラットフォーム: ${s.platform}
-
+ 
 ご予約はプロフィールのリンクから🐺
 #人狼 #LunaLupus`;
 }
-
+ 
 function generateLinePost(s) {
   const guestLine = s.isGuest ? `\n★ ゲスト：${s.guestName} さん` : '';
   return `件名：${s.date.slice(5)} ${s.type} 開催のご案内
-
+ 
 いつもご参加ありがとうございます。
 下記の通り、開催が決定しました。${guestLine}
-
+ 
 ▼ 開催日時
 ${s.date}（${s.day}）${s.time}
-
+ 
 ▼ プラットフォーム
 ${s.platform}
-
+ 
 ▼ 参加費
 ${fmtYen(s.price)}（PayPayにて）
-
+ 
 ご予約はアプリのトップから承っております。
 皆さまのご参加、心よりお待ちしております。`;
 }
-
+ 
 // ============ 顧客管理 ============
 function CustomersAdmin({ onSelect }) {
   const [q, setQ] = useState('');
   const [tier, setTier] = useState('all');
-
+ 
   const list = useMemo(() => CUSTOMERS.filter(c =>
     (tier === 'all' || c.tier === tier) &&
     (q === '' || c.name.includes(q) || c.handle.includes(q))
   ), [q, tier]);
-
+ 
   return (
     <div className="fadeup">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
@@ -2004,7 +2004,7 @@ function CustomersAdmin({ onSelect }) {
           ))}
         </div>
       </div>
-
+ 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
         {list.map((c, i) => (
           <article key={c.id} onClick={() => onSelect(c)} className="fadeup" style={{
@@ -2054,10 +2054,10 @@ function CustomersAdmin({ onSelect }) {
     </div>
   );
 }
-
+ 
 function CustomerDetail({ customer, onBack, sessions, participants }) {
   const myHistory = participants.filter(p => p.customerId === customer.id).map(p => ({ ...p, session: sessions.find(s => s.id === p.sessionId) })).filter(x => x.session);
-
+ 
   return (
     <div className="fadeup">
       <button onClick={onBack} style={{
@@ -2065,7 +2065,7 @@ function CustomerDetail({ customer, onBack, sessions, participants }) {
         cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, letterSpacing: '0.15em',
         display: 'flex', alignItems: 'center', gap: 6, marginBottom: 24, padding: 0,
       }}><ArrowLeft size={14} /> 一覧へ</button>
-
+ 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 24, marginBottom: 32 }}>
         <div style={{
           padding: 28, background: 'linear-gradient(180deg, rgba(201,168,106,0.08), rgba(201,168,106,0.02))',
@@ -2093,14 +2093,14 @@ function CustomerDetail({ customer, onBack, sessions, participants }) {
             <div style={{ fontSize: 12, color: 'rgba(232,227,216,0.85)', lineHeight: 1.7 }}>{customer.notes}</div>
           </div>
         </div>
-
+ 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, alignContent: 'start' }}>
           <Stat label="参加回数" value={customer.total} unit="回" />
           <Stat label="累計支払" value={fmtYen(customer.spent)} small />
           <Stat label="お気に入り" value={customer.favoriteType} small />
         </div>
       </div>
-
+ 
       <h3 className="display" style={{ fontSize: 13, letterSpacing: '0.3em', color: 'rgba(232,227,216,0.7)', marginBottom: 16, fontWeight: 500 }}>── 参加履歴</h3>
       <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 3, overflow: 'hidden' }}>
         {myHistory.map((h, i) => {
@@ -2130,7 +2130,7 @@ function CustomerDetail({ customer, onBack, sessions, participants }) {
     </div>
   );
 }
-
+ 
 function ContactRow({ icon, value }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, fontSize: 11, color: 'rgba(232,227,216,0.65)' }}>
@@ -2139,3 +2139,4 @@ function ContactRow({ icon, value }) {
     </div>
   );
 }
+ 

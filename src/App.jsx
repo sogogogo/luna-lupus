@@ -200,6 +200,12 @@ function enrichSession(s) {
 }
 
 const fmtYen = (n) => '¥' + n.toLocaleString('ja-JP');
+// "2026-05-15" → "5/15"  /  曜日付き: fmtMD(d, '金') → "5/15（金）"
+const fmtMD = (dateStr, day) => {
+  const m = Number(dateStr.slice(5, 7));
+  const d = Number(dateStr.slice(8, 10));
+  return day ? `${m}/${d}（${day}）` : `${m}/${d}`;
+};
 
 // =====================================================================
 // トースト通知
@@ -302,11 +308,11 @@ function AppInner() {
       minHeight: '100vh',
       background: pageBg,
       transition: 'background 0.6s ease',
-      fontFamily: '"Hiragino Maru Gothic ProN", "Yu Gothic", "Meiryo", sans-serif',
+      fontFamily: '"Inter", "Helvetica Neue", "Hiragino Maru Gothic ProN", "Yu Gothic", "Meiryo", sans-serif',
       color: '#2c3140',
     }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&family=DM+Mono:wght@400;500&family=Caveat:wght@500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&family=DM+Mono:wght@400;500&family=Caveat:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
         * { box-sizing: border-box; }
         body { margin: 0; }
         .num { font-family: 'DM Mono', monospace; letter-spacing: -0.01em; }
@@ -1161,7 +1167,7 @@ function ClosedCard({ session, onClick }) {
         {session.title}
       </div>
       <div className="num" style={{ fontSize: 12, color: '#6b6e7a' }}>
-        {session.date.slice(5)}（{session.day}）{session.time}
+        {fmtMD(session.date, session.day)} {session.time}
       </div>
       <div className="num" style={{ fontSize: 18, fontWeight: 600, color: BRAND.closed.primary, marginTop: 8 }}>
         {fmtYen(session.price)}
@@ -1182,23 +1188,31 @@ function GuestCard({ session, onClick }) {
       onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 8px 24px ${b.primary}22`; }}
       onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
     >
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center', marginBottom: 14 }}>
+        {/* アバター：ブランドカラー円の中にブランドアイコン */}
         <div style={{
-          width: 50, height: 50, borderRadius: '50%', flexShrink: 0,
-          background: `linear-gradient(135deg, ${b.primary}, ${b.accent})`,
+          width: 56, height: 56, borderRadius: '50%', flexShrink: 0,
+          background: b.gradient,
+          border: `2px solid ${b.primary}33`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#fff', fontSize: 20, fontWeight: 700, fontFamily: '"Zen Maru Gothic", serif',
-        }}>{session.guestName.charAt(0)}</div>
+          overflow: 'hidden',
+        }}>
+          {b.icon ? (
+            <img src={b.icon} alt="" style={{ width: 40, height: 40, objectFit: 'contain' }} />
+          ) : (
+            <Star size={22} color={b.primary} fill={b.primary} />
+          )}
+        </div>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 9, letterSpacing: '0.3em', color: b.primary, fontWeight: 700, marginBottom: 2 }}>GUEST</div>
-          <div className="maru" style={{ fontSize: 15, fontWeight: 700, color: '#2c3140' }}>{session.guestName}</div>
+          <div style={{ fontSize: 9, letterSpacing: '0.3em', color: b.primary, fontWeight: 700, marginBottom: 4 }}>GUEST</div>
+          <div className="maru" style={{ fontSize: 16, fontWeight: 700, color: '#2c3140', lineHeight: 1.2 }}>{session.guestName}</div>
         </div>
       </div>
-      <div style={{ fontSize: 11, color: '#6b6e7a', lineHeight: 1.6, marginBottom: 12, minHeight: 36 }}>
+      <div style={{ fontSize: 11, color: '#6b6e7a', lineHeight: 1.7, marginBottom: 14, minHeight: 36 }}>
         {session.guestBio}
       </div>
       <div style={{ paddingTop: 12, borderTop: '1px dashed #e0ddd6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div className="num" style={{ fontSize: 12, color: '#6b6e7a' }}>{session.date.slice(5)} ({session.day}) {session.time.split('-')[0]}</div>
+        <div className="num" style={{ fontSize: 12, color: '#6b6e7a' }}>{fmtMD(session.date, session.day)} {session.time.split('-')[0]}</div>
         <div className="num" style={{ fontSize: 17, fontWeight: 700, color: b.primary }}>{fmtYen(session.price)}</div>
       </div>
     </article>
@@ -1226,43 +1240,52 @@ function SessionCard({ session, participants, isBooked, onClick, delay }) {
       onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = `0 8px 20px ${b.primary}1a`; }}
       onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
     >
-      {/* ブランドストライプ */}
-      <div style={{ height: 4, background: `linear-gradient(90deg, ${b.primary}, ${b.accent})` }} />
+      {/* ブランドストライプ（カード幅いっぱい） */}
+      <div style={{ height: 4, width: '100%', background: `linear-gradient(90deg, ${b.primary}, ${b.accent})` }} />
 
-      <div style={{ padding: '18px 20px 16px' }}>
-        {/* ヘッダ */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {b.icon && <img src={b.icon} alt="" style={{ width: 30, height: 30, objectFit: 'contain', flexShrink: 0 }} />}
-            <div>
-              <div style={{ fontSize: 10, color: b.primary, fontWeight: 700, letterSpacing: '0.05em' }}>{b.name}</div>
-              <div className="maru" style={{ fontSize: 13, fontWeight: 700, color: '#2c3140', marginTop: 2 }}>{session.title}</div>
+      <div style={{ padding: '16px 18px 16px' }}>
+        {/* ヘッダ：ブランド名+タイトル / 予約済バッジ */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: 8,
+          marginBottom: 14,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+            {b.icon && <img src={b.icon} alt="" style={{ width: 32, height: 32, objectFit: 'contain', flexShrink: 0 }} />}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 10, color: b.primary, fontWeight: 700, letterSpacing: '0.05em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.name}</div>
+              <div className="maru" style={{ fontSize: 13, fontWeight: 700, color: '#2c3140', marginTop: 2, lineHeight: 1.3 }}>{session.title}</div>
             </div>
           </div>
           {isBooked && (
             <span style={{
-              padding: '3px 9px', fontSize: 9, fontWeight: 700, letterSpacing: '0.15em',
+              padding: '4px 9px', fontSize: 9, fontWeight: 700, letterSpacing: '0.1em',
               background: '#e6f3eb', color: '#3a8c5b', borderRadius: 999,
-              display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0,
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              flexShrink: 0, whiteSpace: 'nowrap',
             }}>
               <CheckCircle2 size={10} /> 予約済
             </span>
           )}
         </div>
 
-        {/* 日時 */}
-        <div className="num" style={{ fontSize: 22, fontWeight: 600, color: '#2c3140', lineHeight: 1, marginBottom: 4 }}>
-          {session.date.slice(8, 10)}
-          <span style={{ fontSize: 12, color: '#6b6e7a', marginLeft: 8, fontWeight: 400 }}>
-            / {session.date.slice(5, 7)}月（{session.day}）
+        {/* 日時ヘッダ：5/15（金）形式・統一サイズ */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
+          <span className="num" style={{ fontSize: 24, fontWeight: 700, color: '#2c3140', lineHeight: 1, letterSpacing: '-0.01em' }}>
+            {Number(session.date.slice(5, 7))}<span style={{ color: '#9499a8', fontWeight: 500, margin: '0 2px' }}>/</span>{Number(session.date.slice(8, 10))}
+          </span>
+          <span className="maru" style={{ fontSize: 15, color: '#6b6e7a', fontWeight: 700 }}>
+            （{session.day}）
           </span>
         </div>
-        <div className="num" style={{ fontSize: 12, color: '#6b6e7a', marginBottom: 12 }}>
+        <div className="num" style={{ fontSize: 12, color: '#6b6e7a', marginBottom: 14 }}>
           {session.time}
         </div>
 
         {/* 詳細 */}
-        <div style={{ borderTop: '1px dashed #e8e5dd', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <div style={{ borderTop: '1px dashed #e8e5dd', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {session.guestName && (
             <Row icon={<Star size={11} fill="#f5c542" stroke="#f5c542" />} text={session.guestName} accent />
           )}
@@ -1270,23 +1293,38 @@ function SessionCard({ session, participants, isBooked, onClick, delay }) {
           <Row icon={session.isOnline ? <Video size={11} /> : <MapPin size={11} />} text={session.venue} />
         </div>
 
-        {/* フッタ */}
-        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #f0ede5', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        {/* フッタ：金額 / 残席 */}
+        <div style={{
+          marginTop: 14, paddingTop: 12, borderTop: '1px solid #f0ede5',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 8,
+        }}>
           <div>
             <div className="num" style={{ fontSize: 22, fontWeight: 700, color: b.primary, lineHeight: 1 }}>
               {fmtYen(session.price)}
             </div>
-            <div style={{ fontSize: 10, color: '#9499a8', marginTop: 3 }}>PayPay 決済</div>
+            <div style={{ fontSize: 10, color: '#9499a8', marginTop: 4 }}>PayPay 決済</div>
           </div>
           <div style={{ textAlign: 'right' }}>
             {isFull ? (
-              <span style={{ fontSize: 11, color: '#d44a4a', fontWeight: 700 }}>満員</span>
+              <span style={{
+                padding: '4px 10px', fontSize: 10, fontWeight: 700, borderRadius: 999,
+                background: '#fce8e0', color: '#d44a4a',
+              }}>満員</span>
             ) : (
               <>
-                <div className="num" style={{ fontSize: 14, color: isLow ? '#e8645f' : '#2c3140', fontWeight: 600 }}>
-                  残 {remaining}<span style={{ color: '#9499a8', fontSize: 11, fontWeight: 400 }}>/{session.capacity}</span>
+                <div className="num" style={{ fontSize: 14, color: isLow ? '#e8645f' : '#2c3140', fontWeight: 700, lineHeight: 1 }}>
+                  残 {remaining}<span style={{ color: '#9499a8', fontSize: 11, fontWeight: 400 }}> / {session.capacity}</span>
                 </div>
-                {isLow && <div style={{ fontSize: 9, color: '#e8645f', marginTop: 2, fontWeight: 700 }}>残りわずか</div>}
+                {isLow && (
+                  <div style={{
+                    marginTop: 4,
+                    fontSize: 9, fontWeight: 700, letterSpacing: '0.05em',
+                    color: '#e8645f',
+                    display: 'inline-block',
+                    padding: '2px 7px', borderRadius: 999,
+                    background: '#fce8e0',
+                  }}>残りわずか</div>
+                )}
               </>
             )}
           </div>
@@ -1298,8 +1336,13 @@ function SessionCard({ session, participants, isBooked, onClick, delay }) {
 
 function Row({ icon, text, accent }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: accent ? '#c9962a' : '#6b6e7a', fontWeight: accent ? 700 : 400 }}>
-      <span style={{ flexShrink: 0 }}>{icon}</span>
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 7,
+      fontSize: 11,
+      color: accent ? '#c9962a' : '#6b6e7a',
+      fontWeight: accent ? 700 : 500,
+    }}>
+      <span style={{ flexShrink: 0, color: accent ? '#c9962a' : '#9499a8', display: 'inline-flex' }}>{icon}</span>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text}</span>
     </div>
   );
@@ -1857,7 +1900,7 @@ function MyPage({ onBack, sessions, participants, myId }) {
               background: '#fff', border: '1px solid #e8e5dd', borderRadius: 10,
               borderLeft: `3px solid ${s.brand.primary}`,
             }}>
-              <div className="num" style={{ fontSize: 13, color: '#2c3140', fontWeight: 600 }}>{s.date.slice(5)} ({s.day})</div>
+              <div className="num" style={{ fontSize: 13, color: '#2c3140', fontWeight: 600 }}>{fmtMD(s.date, s.day)}</div>
               <div>
                 <div style={{ fontSize: 10, color: s.brand.primary, fontWeight: 700 }}>{s.brand.name}</div>
                 <div className="maru" style={{ fontSize: 12, fontWeight: 700, color: '#2c3140' }}>{s.title}</div>
@@ -2020,7 +2063,7 @@ function Dashboard({ sessions, participants }) {
                 gridTemplateColumns: '90px 100px 1fr 90px 70px', gap: 12, alignItems: 'center',
                 borderBottom: '1px solid #f5f3ed',
               }}>
-                <div className="num" style={{ fontSize: 12, color: '#2c3140', fontWeight: 600 }}>{s.date.slice(5)} ({s.day})</div>
+                <div className="num" style={{ fontSize: 12, color: '#2c3140', fontWeight: 600 }}>{fmtMD(s.date, s.day)}</div>
                 <span style={{ padding: '2px 8px', fontSize: 9, fontWeight: 700, borderRadius: 999, background: `${s.brand.primary}1a`, color: s.brand.primary, justifySelf: 'start' }}>
                   {s.brand.name.replace('人狼会', '')}{s.isOffline && '・対面'}
                 </span>
@@ -2141,7 +2184,7 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
               onMouseEnter={(e) => e.currentTarget.style.background = '#fafaf6'}
               onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
             >
-              <div className="num" style={{ fontSize: 12, color: '#2c3140', fontWeight: 600 }}>{s.date.slice(5)} ({s.day})</div>
+              <div className="num" style={{ fontSize: 12, color: '#2c3140', fontWeight: 600 }}>{fmtMD(s.date, s.day)}</div>
               <span style={{
                 padding: '3px 9px', fontSize: 9, fontWeight: 700, borderRadius: 999,
                 background: `${s.brand.primary}1a`, color: s.brand.primary, justifySelf: 'start',
@@ -2591,7 +2634,7 @@ function PaymentsAdmin({ sessions, participants, updateParticipant }) {
                 padding: '14px 18px', cursor: 'pointer', display: 'grid',
                 gridTemplateColumns: '110px 110px 1fr auto auto auto auto', gap: 12, alignItems: 'center',
               }}>
-                <div className="num" style={{ fontSize: 12, color: '#2c3140', fontWeight: 600 }}>{s.date.slice(5)} ({s.day})</div>
+                <div className="num" style={{ fontSize: 12, color: '#2c3140', fontWeight: 600 }}>{fmtMD(s.date, s.day)}</div>
                 <span style={{
                   padding: '3px 9px', fontSize: 9, fontWeight: 700, borderRadius: 999,
                   background: `${s.brand.primary}1a`, color: s.brand.primary, justifySelf: 'start',
@@ -2782,7 +2825,7 @@ function RolesList({ sessions, participants, onSelect }) {
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                 <div>
-                  <div className="num" style={{ fontSize: 14, color: '#2c3140', fontWeight: 600 }}>{s.date.slice(5)} ({s.day})</div>
+                  <div className="num" style={{ fontSize: 14, color: '#2c3140', fontWeight: 600 }}>{fmtMD(s.date, s.day)}</div>
                   <div className="num" style={{ fontSize: 10, color: '#9499a8', marginTop: 2 }}>{s.time}</div>
                 </div>
                 <span style={{ padding: '2px 8px', fontSize: 9, fontWeight: 700, borderRadius: 999, background: `${s.brand.primary}1a`, color: s.brand.primary }}>

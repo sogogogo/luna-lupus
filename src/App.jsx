@@ -181,8 +181,14 @@ const ROLE_STYLES = {
 };
 
 // Helper: 会データに plan の中身を合成して使いやすくする
+// 冪等化済み：既にenrich済みのsessionが渡されてもエラーにならない
 function enrichSession(s) {
-  const plan = PLAN_DEFS[s.plan];
+  if (!s) return s;
+  // 既にenrich済み（plan が文字列ではなくオブジェクト、brandも持っている）の場合はそのまま返す
+  if (s.brand && typeof s.plan === 'object') return s;
+  const planKey = typeof s.plan === 'string' ? s.plan : null;
+  const plan = planKey ? PLAN_DEFS[planKey] : null;
+  if (!plan) return s; // 想定外のデータでもクラッシュしない
   const brand = BRAND[plan.brand];
   return {
     ...s,
@@ -202,8 +208,10 @@ function enrichSession(s) {
 const fmtYen = (n) => '¥' + n.toLocaleString('ja-JP');
 // "2026-05-15" → "5/15"  /  曜日付き: fmtMD(d, '金') → "5/15（金）"
 const fmtMD = (dateStr, day) => {
+  if (!dateStr || typeof dateStr !== 'string') return '';
   const m = Number(dateStr.slice(5, 7));
   const d = Number(dateStr.slice(8, 10));
+  if (isNaN(m) || isNaN(d)) return dateStr;
   return day ? `${m}/${d}（${day}）` : `${m}/${d}`;
 };
 
@@ -2011,7 +2019,7 @@ function AdminView({ sessions, participants, setParticipants, updateSession, set
       </div>
 
       {tab === 'dashboard' && <Dashboard sessions={sessions} participants={participants} />}
-      {tab === 'sessions' && <SessionsAdmin sessions={sessions} participants={participants} updateSession={updateSession} />}
+      {tab === 'sessions' && <SessionsAdmin sessions={sessions} participants={participants} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} />}
       {tab === 'payments' && <PaymentsAdmin sessions={sessions} participants={participants} updateParticipant={updateParticipant} />}
       {tab === 'roles' && (selectedSession
         ? <RoleAssignment session={enrichSession(selectedSession)} participants={participants} updateParticipant={updateParticipant} onBack={() => setSelectedSession(null)} setParticipants={setParticipants} />
@@ -2158,16 +2166,15 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
         ><Plus size={13} /> 新しい会を作成</button>
       </div>
 
-      <div style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12, overflow: 'auto' }}>
+      <div style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12, overflow: 'hidden' }}>
         <div style={{
-          display: 'grid', gridTemplateColumns: '110px 110px 1fr 90px 90px 90px 110px',
-          gap: 12, padding: '12px 18px', minWidth: 1020,
+          display: 'grid', gridTemplateColumns: '90px 90px 1fr 80px 70px 130px',
+          gap: 10, padding: '12px 16px',
           background: '#fafaf6', fontSize: 10, fontWeight: 700, color: '#9499a8', letterSpacing: '0.1em',
         }}>
           <div>日付</div><div>ブランド</div><div>会タイトル / 詳細</div>
           <div style={{ textAlign: 'right' }}>料金</div>
           <div style={{ textAlign: 'right' }}>予約</div>
-          <div style={{ textAlign: 'right' }}>売上</div>
           <div style={{ textAlign: 'right' }}>操作</div>
         </div>
         {sessions.filter(s => s.status === 'open').map(raw => {
@@ -2176,8 +2183,8 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
           const ratio = cnt / s.capacity;
           return (
             <div key={s.id} style={{
-              display: 'grid', gridTemplateColumns: '110px 110px 1fr 90px 90px 90px 110px',
-              gap: 12, padding: '14px 18px', alignItems: 'center', minWidth: 1020,
+              display: 'grid', gridTemplateColumns: '90px 90px 1fr 80px 70px 130px',
+              gap: 10, padding: '12px 16px', alignItems: 'center',
               borderTop: '1px solid #f5f3ed',
               transition: 'background 0.15s',
             }}
@@ -2186,38 +2193,38 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
             >
               <div className="num" style={{ fontSize: 12, color: '#2c3140', fontWeight: 600 }}>{fmtMD(s.date, s.day)}</div>
               <span style={{
-                padding: '3px 9px', fontSize: 9, fontWeight: 700, borderRadius: 999,
+                padding: '3px 7px', fontSize: 9, fontWeight: 700, borderRadius: 999,
                 background: `${s.brand.primary}1a`, color: s.brand.primary, justifySelf: 'start',
                 display: 'inline-flex', alignItems: 'center', gap: 3,
+                whiteSpace: 'nowrap',
               }}>
                 {s.isClosed && <Lock size={9} />}
                 {s.brand.name.replace('人狼会', '')}
               </span>
-              <div>
-                <div className="maru" style={{ fontSize: 12, fontWeight: 700, color: '#2c3140' }}>{s.title}</div>
-                <div style={{ fontSize: 10, color: '#9499a8', marginTop: 2 }}>
+              <div style={{ minWidth: 0 }}>
+                <div className="maru" style={{ fontSize: 12, fontWeight: 700, color: '#2c3140', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</div>
+                <div style={{ fontSize: 10, color: '#9499a8', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {s.gm}{s.guestName && ` × ${s.guestName}`} · {s.venue}
                   {s.isClosed && ` · 招待 ${(s.invitedCustomerIds || []).length}名`}
                 </div>
               </div>
               <div className="num" style={{ fontSize: 12, color: s.brand.primary, fontWeight: 700, textAlign: 'right' }}>{fmtYen(s.price)}</div>
               <div style={{ textAlign: 'right' }}>
-                <div className="num" style={{ fontSize: 12, color: '#2c3140', fontWeight: 600 }}>{cnt}/{s.capacity}</div>
+                <div className="num" style={{ fontSize: 11, color: '#2c3140', fontWeight: 600 }}>{cnt}/{s.capacity}</div>
                 <div style={{ height: 3, background: '#f0ede5', borderRadius: 2, marginTop: 3, overflow: 'hidden' }}>
                   <div style={{ width: `${ratio * 100}%`, height: '100%', background: ratio === 1 ? '#d44a4a' : s.brand.primary }} />
                 </div>
               </div>
-              <div className="num" style={{ fontSize: 12, color: '#2c3140', fontWeight: 600, textAlign: 'right' }}>{fmtYen(s.price * cnt)}</div>
-              <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
                 {s.isClosed && (
                   <button onClick={() => setEditing(raw)} title="招待設定" style={{
-                    padding: '5px 8px', background: BRAND.closed.softer, border: '1px solid #d4d0c8',
+                    padding: '5px 7px', background: BRAND.closed.softer, border: '1px solid #d4d0c8',
                     color: BRAND.closed.primary, borderRadius: 5, cursor: 'pointer', fontFamily: 'inherit', fontSize: 10, fontWeight: 700,
-                    display: 'inline-flex', alignItems: 'center', gap: 3,
+                    display: 'inline-flex', alignItems: 'center', gap: 2, whiteSpace: 'nowrap',
                   }}><UserCheck size={10} /> 招待</button>
                 )}
                 <button onClick={() => setEditingSession(raw)} title="編集" style={{
-                  padding: '5px 8px', background: '#fff', border: '1px solid #d4d0c8',
+                  padding: '5px 9px', background: '#fff', border: '1px solid #d4d0c8',
                   color: '#6b6e7a', borderRadius: 5, cursor: 'pointer', fontFamily: 'inherit', fontSize: 10, fontWeight: 600,
                 }}>編集</button>
                 <button onClick={() => setDeletingId(raw.id)} title="削除" style={{

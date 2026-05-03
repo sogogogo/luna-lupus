@@ -401,6 +401,15 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
   const setFilter = setBrandFilter;
   const [announceOpen, setAnnounceOpen] = useState(false);
 
+  // ====== 検索・絞り込み state ======
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [priceRange, setPriceRange] = useState('all'); // 'all' | 'low' | 'mid' | 'high' | 'top' | 'custom'
+  const [priceMin, setPriceMin] = useState('');
+  const [priceMax, setPriceMax] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
   const ME_ID = 1;
 
   // 自分が見える会だけにフィルタ（クローズドは招待リストに自分が含まれている時のみ）
@@ -409,10 +418,65 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
     .map(enrichSession)
     .filter(s => !s.isClosed || (s.invitedCustomerIds || []).includes(ME_ID));
 
+  // 価格レンジの判定
+  const matchesPrice = (price) => {
+    if (priceRange === 'all') return true;
+    if (priceRange === 'low') return price < 2500;
+    if (priceRange === 'mid') return price >= 2500 && price < 4000;
+    if (priceRange === 'high') return price >= 4000 && price < 5000;
+    if (priceRange === 'top') return price >= 5000;
+    if (priceRange === 'custom') {
+      const min = priceMin === '' ? 0 : Number(priceMin);
+      const max = priceMax === '' ? Infinity : Number(priceMax);
+      return price >= min && price <= max;
+    }
+    return true;
+  };
+
+  // 日付レンジの判定
+  const matchesDate = (date) => {
+    if (!dateFrom && !dateTo) return true;
+    if (dateFrom && date < dateFrom) return false;
+    if (dateTo && date > dateTo) return false;
+    return true;
+  };
+
+  // 検索クエリの判定
+  const matchesQuery = (s) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.trim().toLowerCase();
+    const fields = [
+      s.title, s.gm, s.guestName, s.guestBio, s.venue, s.brand.name,
+      s.plan?.label, s.platform,
+    ].filter(Boolean).map(f => f.toLowerCase());
+    return fields.some(f => f.includes(q));
+  };
+
   const filtered = useMemo(() => {
-    if (filter === 'all') return visibleSessions;
-    return visibleSessions.filter(s => s.brand.key === filter);
-  }, [filter, visibleSessions]);
+    return visibleSessions.filter(s => {
+      if (filter !== 'all' && s.brand.key !== filter) return false;
+      if (!matchesQuery(s)) return false;
+      if (!matchesPrice(s.price)) return false;
+      if (!matchesDate(s.date)) return false;
+      return true;
+    });
+  }, [filter, visibleSessions, searchQuery, priceRange, priceMin, priceMax, dateFrom, dateTo]);
+
+  // 適用中のフィルタ数（リセットボタン表示用）
+  const activeFilterCount = (
+    (searchQuery.trim() ? 1 : 0) +
+    (priceRange !== 'all' ? 1 : 0) +
+    (dateFrom || dateTo ? 1 : 0)
+  );
+
+  const resetSearch = () => {
+    setSearchQuery('');
+    setPriceRange('all');
+    setPriceMin('');
+    setPriceMax('');
+    setDateFrom('');
+    setDateTo('');
+  };
 
   const myBookings = participants.filter(p => p.customerId === ME_ID);
   const bookedSessionIds = new Set(myBookings.filter(b => !b.cancelled).map(b => b.sessionId));
@@ -420,9 +484,9 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
 
   // ゲスト出演がある会（フィルタに連動）
   const guestSessions = filtered.filter(s => s.guestName);
-  // クローズドで自分が招待されている会（フィルタに連動。ただしフィルタが all の時のみ表示）
+  // クローズドで自分が招待されている会（フィルタに連動。ただしフィルタが all かつ検索なしの時のみ表示）
   const closedForMe = visibleSessions.filter(s => s.isClosed);
-  const showClosedSection = filter === 'all' && closedForMe.length > 0;
+  const showClosedSection = filter === 'all' && activeFilterCount === 0 && closedForMe.length > 0;
 
   // ブランド別の件数（タブ表示用）
   const brandCounts = {
@@ -465,6 +529,22 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
           <button onClick={() => setStep('mypage')} style={btnGhost()}>
             <User size={14} /> マイページ
           </button>
+          <button onClick={() => setSearchOpen(!searchOpen)} style={{
+            ...btnGhost(),
+            color: searchOpen || activeFilterCount > 0 ? '#fff' : '#2c3140',
+            background: searchOpen || activeFilterCount > 0 ? '#2c3140' : '#fff',
+            borderColor: searchOpen || activeFilterCount > 0 ? '#2c3140' : '#e0ddd6',
+            position: 'relative',
+          }}>
+            <Search size={14} /> 会を検索・絞り込み
+            {activeFilterCount > 0 && (
+              <span style={{
+                marginLeft: 4, padding: '1px 7px',
+                background: '#f5c542', color: '#2c3140',
+                borderRadius: 999, fontSize: 10, fontWeight: 700,
+              }}>{activeFilterCount}</span>
+            )}
+          </button>
           <button onClick={() => setAnnounceOpen(true)} style={{ ...btnGhost(), color: '#e8645f', borderColor: '#f5c5c2', position: 'relative' }}>
             <Bell size={14} /> お知らせ
             <span style={{ position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: '50%', background: '#e8645f' }} />
@@ -475,9 +555,26 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
       })()}
 
       {/* 2大ブランド・タブ式フィルタ */}
-      <section style={{ marginBottom: 32 }}>
+      <section style={{ marginBottom: 20 }}>
         <BrandTabs filter={filter} setFilter={setFilter} counts={brandCounts} />
       </section>
+
+      {/* 検索・絞り込みパネル */}
+      {searchOpen && (
+        <SearchPanel
+          searchQuery={searchQuery} setSearchQuery={setSearchQuery}
+          priceRange={priceRange} setPriceRange={setPriceRange}
+          priceMin={priceMin} setPriceMin={setPriceMin}
+          priceMax={priceMax} setPriceMax={setPriceMax}
+          dateFrom={dateFrom} setDateFrom={setDateFrom}
+          dateTo={dateTo} setDateTo={setDateTo}
+          activeCount={activeFilterCount}
+          onReset={resetSearch}
+          onClose={() => setSearchOpen(false)}
+          resultCount={filtered.length}
+          accent={filter === 'all' ? '#2c3140' : BRAND[filter].primary}
+        />
+      )}
 
       {/* クローズド会（招待されている人だけ見える・フィルタが all の時のみ） */}
       {showClosedSection && (
@@ -518,14 +615,42 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
 
       {/* スケジュールタイトル */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-        <h2 className="maru" style={{ fontSize: 19, fontWeight: 900, color: '#2c3140', margin: 0 }}>
+        <h2 className="maru" style={{ fontSize: 19, fontWeight: 900, color: '#2c3140', margin: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           開催スケジュール
           {filter !== 'all' && (
-            <span style={{ fontSize: 12, color: BRAND[filter]?.primary, marginLeft: 10, fontWeight: 700 }}>
-              · {BRAND[filter]?.name}（{filtered.length}件）
+            <span style={{ fontSize: 12, color: BRAND[filter]?.primary, fontWeight: 700 }}>
+              · {BRAND[filter]?.name}
+            </span>
+          )}
+          {(filter !== 'all' || activeFilterCount > 0) && (
+            <span style={{
+              fontSize: 11, fontWeight: 700,
+              padding: '3px 10px', borderRadius: 999,
+              background: filter === 'all' ? '#f0ede5' : `${BRAND[filter].primary}1a`,
+              color: filter === 'all' ? '#6b6e7a' : BRAND[filter].primary,
+            }}>{filtered.length}件</span>
+          )}
+          {activeFilterCount > 0 && (
+            <span style={{
+              fontSize: 11, fontWeight: 700,
+              padding: '3px 10px', borderRadius: 999,
+              background: '#fef0d7', color: '#c9962a',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+            }}>
+              <Search size={11} /> {activeFilterCount}個の条件で絞り込み中
             </span>
           )}
         </h2>
+        {activeFilterCount > 0 && (
+          <button onClick={resetSearch} style={{
+            padding: '6px 12px', background: 'transparent', border: '1px solid #d4d0c8',
+            color: '#6b6e7a', borderRadius: 999, cursor: 'pointer',
+            fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+          }}>
+            <RotateCcw size={11} /> 絞り込みを解除
+          </button>
+        )}
       </div>
 
       {/* セッション一覧 */}
@@ -549,7 +674,19 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
           background: '#fafaf6', border: '1px dashed #d4d0c8', borderRadius: 12,
           color: '#9499a8', fontSize: 13,
         }}>
-          このブランドの開催予定はまだありません
+          {activeFilterCount > 0 ? (
+            <>
+              <Search size={28} color="#c8c4ba" style={{ marginBottom: 12 }} />
+              <div style={{ fontSize: 14, color: '#6b6e7a', fontWeight: 700, marginBottom: 6 }}>該当する会が見つかりませんでした</div>
+              <div style={{ fontSize: 11, color: '#9499a8', marginBottom: 16 }}>絞り込み条件を変更してみてください</div>
+              <button onClick={resetSearch} style={{
+                padding: '8px 18px', background: '#fff', border: '1px solid #d4d0c8',
+                color: '#2c3140', borderRadius: 8, cursor: 'pointer',
+                fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+              }}><RotateCcw size={12} /> 絞り込みを解除</button>
+            </>
+          ) : '開催予定はまだありません'}
         </div>
       )}
 
@@ -761,6 +898,215 @@ function BrandTabs({ filter, setFilter, counts }) {
       </div>
     </div>
   );
+}
+
+// ============ 検索・絞り込みパネル ============
+function SearchPanel({
+  searchQuery, setSearchQuery,
+  priceRange, setPriceRange,
+  priceMin, setPriceMin, priceMax, setPriceMax,
+  dateFrom, setDateFrom, dateTo, setDateTo,
+  activeCount, onReset, onClose, resultCount, accent,
+}) {
+  return (
+    <section className="fadeup" style={{
+      marginBottom: 32, padding: '20px 24px',
+      background: '#fff', borderRadius: 14,
+      border: '1.5px solid #e8e5dd',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.04)',
+    }}>
+      {/* ヘッダー */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <h3 className="maru" style={{ margin: 0, fontSize: 15, fontWeight: 900, color: '#2c3140', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Search size={15} color={accent} />
+          会を絞り込む
+          {activeCount > 0 && (
+            <span style={{
+              padding: '2px 9px', fontSize: 10, fontWeight: 700, borderRadius: 999,
+              background: '#fef0d7', color: '#c9962a',
+            }}>{activeCount}個の条件</span>
+          )}
+        </h3>
+        <button onClick={onClose} style={{
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          color: '#9499a8', padding: 4,
+        }}><X size={16} /></button>
+      </div>
+
+      {/* キーワード検索 */}
+      <div style={{ marginBottom: 18 }}>
+        <SearchFieldLabel>
+          <Hash size={11} /> キーワード検索
+        </SearchFieldLabel>
+        <div style={{ position: 'relative' }}>
+          <Search size={14} color="#9499a8" style={{ position: 'absolute', left: 12, top: 12 }} />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="例: ゲスト名、会のタイトル、GM名、会場名..."
+            style={{ ...inputStyle, paddingLeft: 36 }}
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} style={{
+              position: 'absolute', right: 8, top: 8,
+              background: '#f0ede5', border: 'none', borderRadius: '50%',
+              width: 22, height: 22, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: '#6b6e7a',
+            }}><X size={12} /></button>
+          )}
+        </div>
+      </div>
+
+      {/* 金額レンジ */}
+      <div style={{ marginBottom: 18 }}>
+        <SearchFieldLabel>
+          <CreditCard size={11} /> 金額で絞り込み
+        </SearchFieldLabel>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          {[
+            { id: 'all', label: 'すべて' },
+            { id: 'low', label: '〜2,500円' },
+            { id: 'mid', label: '2,500〜4,000円' },
+            { id: 'high', label: '4,000〜5,000円' },
+            { id: 'top', label: '5,000円〜' },
+            { id: 'custom', label: 'カスタム' },
+          ].map(p => (
+            <button key={p.id} onClick={() => setPriceRange(p.id)} style={{
+              padding: '7px 13px', borderRadius: 999,
+              background: priceRange === p.id ? accent : '#fff',
+              border: `1.5px solid ${priceRange === p.id ? accent : '#e0ddd6'}`,
+              color: priceRange === p.id ? '#fff' : '#6b6e7a',
+              cursor: 'pointer', fontFamily: 'inherit',
+              fontSize: 11, fontWeight: 600,
+              transition: 'all 0.15s',
+            }}>{p.label}</button>
+          ))}
+        </div>
+        {priceRange === 'custom' && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <span style={{ position: 'absolute', left: 12, top: 11, fontSize: 12, color: '#9499a8' }}>¥</span>
+              <input
+                type="number"
+                value={priceMin}
+                onChange={(e) => setPriceMin(e.target.value)}
+                placeholder="最低"
+                style={{ ...inputStyle, paddingLeft: 26 }}
+              />
+            </div>
+            <span style={{ color: '#9499a8', fontSize: 12 }}>〜</span>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <span style={{ position: 'absolute', left: 12, top: 11, fontSize: 12, color: '#9499a8' }}>¥</span>
+              <input
+                type="number"
+                value={priceMax}
+                onChange={(e) => setPriceMax(e.target.value)}
+                placeholder="最高"
+                style={{ ...inputStyle, paddingLeft: 26 }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 日付レンジ */}
+      <div style={{ marginBottom: 18 }}>
+        <SearchFieldLabel>
+          <Calendar size={11} /> 開催日で絞り込み
+        </SearchFieldLabel>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+            style={{ ...inputStyle, flex: 1, minWidth: 150 }} />
+          <span style={{ color: '#9499a8', fontSize: 12 }}>〜</span>
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+            style={{ ...inputStyle, flex: 1, minWidth: 150 }} />
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {[
+            { label: '今週', from: getThisWeekStart(), to: getThisWeekEnd() },
+            { label: '今月', from: '2026-05-01', to: '2026-05-31' },
+            { label: '来月', from: '2026-06-01', to: '2026-06-30' },
+            { label: '週末のみ', from: '', to: '', special: 'weekend' },
+          ].map(preset => (
+            <button key={preset.label}
+              onClick={() => {
+                if (preset.special === 'weekend') {
+                  // 週末プリセットはここでは単純化（実装拡張可能）
+                  setDateFrom('2026-05-09'); setDateTo('2026-05-31');
+                } else {
+                  setDateFrom(preset.from); setDateTo(preset.to);
+                }
+              }}
+              style={{
+                padding: '5px 11px', borderRadius: 999,
+                background: '#f5f3ed', border: '1px solid #e8e5dd',
+                color: '#6b6e7a', cursor: 'pointer', fontFamily: 'inherit',
+                fontSize: 10, fontWeight: 600,
+              }}>{preset.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* フッター */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        paddingTop: 14, borderTop: '1px dashed #e8e5dd',
+      }}>
+        <div style={{ fontSize: 12, color: '#6b6e7a' }}>
+          <span style={{ fontWeight: 700, color: accent, fontSize: 16 }}>{resultCount}</span> 件の会が該当します
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {activeCount > 0 && (
+            <button onClick={onReset} style={{
+              padding: '8px 14px', background: '#fff', border: '1px solid #d4d0c8',
+              color: '#6b6e7a', borderRadius: 8, cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+            }}>
+              <RotateCcw size={11} /> リセット
+            </button>
+          )}
+          <button onClick={onClose} style={{
+            padding: '8px 16px', background: accent, border: 'none',
+            color: '#fff', borderRadius: 8, cursor: 'pointer',
+            fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+          }}>
+            <Check size={11} /> この条件で表示
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SearchFieldLabel({ children }) {
+  return (
+    <div style={{
+      fontSize: 11, fontWeight: 700, color: '#6b6e7a',
+      marginBottom: 8,
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+    }}>{children}</div>
+  );
+}
+
+function getThisWeekStart() {
+  const now = new Date('2026-05-03');
+  const day = now.getDay();
+  const diff = now.getDate() - day;
+  const d = new Date(now);
+  d.setDate(diff);
+  return d.toISOString().slice(0, 10);
+}
+
+function getThisWeekEnd() {
+  const now = new Date('2026-05-03');
+  const day = now.getDay();
+  const diff = now.getDate() + (6 - day);
+  const d = new Date(now);
+  d.setDate(diff);
+  return d.toISOString().slice(0, 10);
 }
 
 // ============ ブランドカード ============

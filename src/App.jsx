@@ -4,8 +4,9 @@ import {
   TrendingUp, User, Phone, Mail, Search, X, ArrowLeft, QrCode, Wallet, Video, Star,
   Megaphone, Shuffle, Eye, EyeOff, Send, Copy, RotateCcw, XCircle, CheckCircle2,
   AlertTriangle, Bell, Hash, MessageCircle, Link2, Zap, MapPin, Lock, UserCheck, Plus,
-  List, LayoutGrid, CalendarDays, ListChecks,
+  List, LayoutGrid, CalendarDays, ListChecks, LogOut,
 } from 'lucide-react';
+import { signIn, signOutUser, onAuthChange } from './lib/auth';
 import {
   subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
   subscribeCustomers, seedCustomers,
@@ -378,6 +379,23 @@ function ToastProvider({ children }) {
 }
 
 // =====================================================================
+// 認証（Firebase Auth）— 運営者ログイン状態を全画面に供給
+// =====================================================================
+const AuthContext = createContext({ user: null, loading: true });
+const useAuth = () => useContext(AuthContext);
+
+function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    // 起動時に復元（リロードしてもログイン状態が保たれる）
+    const unsub = onAuthChange((u) => { setUser(u); setLoading(false); });
+    return () => unsub();
+  }, []);
+  return <AuthContext.Provider value={{ user, loading }}>{children}</AuthContext.Provider>;
+}
+
+// =====================================================================
 // 顧客データ（Firestore）— ToastProvider と同じ Context 流儀で全画面に供給
 // CUSTOMERS は読み取り専用のため state ではなく Context で配る（prop-drilling 回避）
 // =====================================================================
@@ -403,15 +421,18 @@ function CustomersProvider({ children }) {
 export default function App() {
   return (
     <ToastProvider>
-      <CustomersProvider>
-        <AppInner />
-      </CustomersProvider>
+      <AuthProvider>
+        <CustomersProvider>
+          <AppInner />
+        </CustomersProvider>
+      </AuthProvider>
     </ToastProvider>
   );
 }
 
 function AppInner() {
   const toast = useToast();
+  const { user, loading: authLoading } = useAuth();
   const [view, setView] = useState('customer');
   const [sessions, setSessions] = useState([]);              // Firestore から読み込む（DB移行: sessions）
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -558,32 +579,51 @@ function AppInner() {
           </div>
         </div>
 
-        <div style={{
-          display: 'flex',
-          background: '#f0eee8',
-          borderRadius: 999,
-          padding: 3,
-        }}>
-          {['customer', 'admin'].map(v => (
-            <button key={v} onClick={() => setView(v)} style={{
-              padding: '7px 18px', borderRadius: 999, border: 'none', cursor: 'pointer',
-              fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
-              background: view === v ? '#2c3140' : 'transparent',
-              color: view === v ? '#fff' : '#6b6e7a',
-              transition: 'all 0.2s',
-            }}>
-              {v === 'customer' ? '参加者' : '管理者'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            display: 'flex',
+            background: '#f0eee8',
+            borderRadius: 999,
+            padding: 3,
+          }}>
+            {['customer', 'admin'].map(v => (
+              <button key={v} onClick={() => setView(v)} style={{
+                padding: '7px 18px', borderRadius: 999, border: 'none', cursor: 'pointer',
+                fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+                background: view === v ? '#2c3140' : 'transparent',
+                color: view === v ? '#fff' : '#6b6e7a',
+                transition: 'all 0.2s',
+              }}>
+                {v === 'customer' ? '参加者' : '管理者'}
+              </button>
+            ))}
+          </div>
+          {/* ログアウト（管理者ログイン中のみ） */}
+          {view === 'admin' && user && (
+            <button onClick={async () => { await signOutUser(); toast.push('ログアウトしました', 'info'); }} style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '7px 12px', background: '#fff', border: '1px solid #e0ddd6',
+              borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit',
+              fontSize: 11, fontWeight: 700, color: '#6b6e7a',
+            }} title={user.email || 'ログアウト'}>
+              <LogOut size={13} /> ログアウト
             </button>
-          ))}
+          )}
         </div>
       </header>
 
       <main>
-        {sessionsLoading
-          ? <SessionsLoading />
-          : view === 'customer'
-          ? <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} brandFilter={brandFilter} setBrandFilter={setBrandFilter} schedulePolls={schedulePolls} pollResponses={pollResponses} upsertPollResponse={upsertPollResponse} />
-          : <AdminView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />
+        {view === 'admin'
+          ? (authLoading
+              ? <SessionsLoading label="認証情報を確認しています…" sub="ログイン状態を確認中" />
+              : !user
+              ? <LoginScreen />
+              : sessionsLoading
+              ? <SessionsLoading />
+              : <AdminView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />)
+          : (sessionsLoading
+              ? <SessionsLoading />
+              : <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} brandFilter={brandFilter} setBrandFilter={setBrandFilter} schedulePolls={schedulePolls} pollResponses={pollResponses} upsertPollResponse={upsertPollResponse} />)
         }
       </main>
     </div>
@@ -591,12 +631,124 @@ function AppInner() {
 }
 
 // 会データ読み込み中の表示（真っ白防止）
-function SessionsLoading() {
+function SessionsLoading({ label = '会データを読み込んでいます…', sub = 'Firestore から開催スケジュールを取得中' }) {
   return (
     <div className="fadeup" style={{ maxWidth: 1080, margin: '0 auto', padding: '120px 28px', textAlign: 'center' }}>
       <div className="float" style={{ fontSize: 36, marginBottom: 14 }}>🗓️</div>
-      <div className="maru" style={{ fontSize: 16, fontWeight: 700, color: '#2c3140', marginBottom: 6 }}>会データを読み込んでいます…</div>
-      <div style={{ fontSize: 12, color: '#9499a8' }}>Firestore から開催スケジュールを取得中</div>
+      <div className="maru" style={{ fontSize: 16, fontWeight: 700, color: '#2c3140', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 12, color: '#9499a8' }}>{sub}</div>
+    </div>
+  );
+}
+
+// Firebase Auth のエラーコードを分かりやすい日本語に変換
+function authErrorMessage(err) {
+  const code = err?.code || '';
+  switch (code) {
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'メールアドレスまたはパスワードが正しくありません。';
+    case 'auth/invalid-email':
+      return 'メールアドレスの形式が正しくありません。';
+    case 'auth/user-disabled':
+      return 'このアカウントは無効化されています。';
+    case 'auth/too-many-requests':
+      return 'ログインの試行が多すぎます。しばらく待ってから再度お試しください。';
+    case 'auth/network-request-failed':
+      return 'ネットワークエラーが発生しました。接続を確認してください。';
+    default:
+      return 'ログインに失敗しました。時間をおいて再度お試しください。';
+  }
+}
+
+// ============ 運営者ログイン画面 ============
+function LoginScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const accent = BRAND.okiraku.primary;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!email.trim() || !password || submitting) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await signIn(email.trim(), password);
+      // 成功すると onAuthChange が user を更新し、管理画面が表示される
+    } catch (err) {
+      setError(authErrorMessage(err));
+      setSubmitting(false);
+    }
+  };
+
+  const canSubmit = email.trim() && password && !submitting;
+
+  return (
+    <div className="fadeup" style={{ maxWidth: 420, margin: '0 auto', padding: '70px 28px 80px' }}>
+      <div style={{ textAlign: 'center', marginBottom: 24 }}>
+        <div style={{
+          width: 56, height: 56, margin: '0 auto 14px', borderRadius: 16,
+          background: `${accent}1a`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Lock size={24} color={accent} />
+        </div>
+        <h2 className="maru" style={{ fontSize: 22, fontWeight: 900, color: '#2c3140', margin: '0 0 6px' }}>管理者ログイン</h2>
+        <p style={{ fontSize: 12, color: '#9499a8' }}>運営者アカウントでログインしてください</p>
+      </div>
+
+      <form onSubmit={handleSubmit} style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 16, padding: 24 }}>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: 'block', fontSize: 11, color: '#6b6e7a', fontWeight: 700, marginBottom: 6 }}>メールアドレス</label>
+          <div style={{ position: 'relative' }}>
+            <Mail size={14} color="#9499a8" style={{ position: 'absolute', left: 12, top: 13 }} />
+            <input
+              type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              autoComplete="username" placeholder="admin@example.com"
+              style={{ ...inputStyle, paddingLeft: 34 }}
+            />
+          </div>
+        </div>
+
+        <div style={{ marginBottom: error ? 12 : 18 }}>
+          <label style={{ display: 'block', fontSize: 11, color: '#6b6e7a', fontWeight: 700, marginBottom: 6 }}>パスワード</label>
+          <div style={{ position: 'relative' }}>
+            <Lock size={14} color="#9499a8" style={{ position: 'absolute', left: 12, top: 13 }} />
+            <input
+              type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password" placeholder="••••••••"
+              style={{ ...inputStyle, paddingLeft: 34 }}
+            />
+          </div>
+        </div>
+
+        {error && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16,
+            padding: '10px 12px', background: '#fce8e0', border: '1px solid #f5c5b6',
+            borderRadius: 8, fontSize: 12, color: '#a85a3f', fontWeight: 600,
+          }}>
+            <AlertCircle size={14} /> {error}
+          </div>
+        )}
+
+        <button type="submit" disabled={!canSubmit} style={{
+          width: '100%', padding: 13,
+          background: canSubmit ? `linear-gradient(135deg, ${accent}, ${BRAND.okiraku.accent})` : '#e0ddd6',
+          border: 'none', color: '#fff', borderRadius: 10,
+          cursor: canSubmit ? 'pointer' : 'not-allowed',
+          fontFamily: 'inherit', fontSize: 14, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}>
+          {submitting ? 'ログイン中…' : <><LogOut size={15} style={{ transform: 'rotate(180deg)' }} /> ログイン</>}
+        </button>
+      </form>
+
+      <p style={{ textAlign: 'center', fontSize: 11, color: '#b0ada5', marginTop: 16 }}>
+        参加者ページは上部の「参加者」タブから、ログインなしでご利用いただけます。
+      </p>
     </div>
   );
 }

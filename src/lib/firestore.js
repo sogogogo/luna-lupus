@@ -87,3 +87,30 @@ export async function seedCustomers(customersArr) {
     customersArr.map((c) => setDoc(doc(db, CUSTOMERS_COL, String(c.id)), clean(c))),
   );
 }
+
+// =====================================================================
+// participants コレクション（参加申込）。id は 'p1' 等の文字列
+// =====================================================================
+const PARTICIPANTS_COL = 'participants';
+
+export function subscribeParticipants(onChange, onError) {
+  return onSnapshot(
+    collection(db, PARTICIPANTS_COL),
+    (snap) => onChange(snap.docs.map((d) => d.data())),
+    onError,
+  );
+}
+export function saveParticipant(participant) {
+  return setDoc(doc(db, PARTICIPANTS_COL, String(participant.id)), clean(participant));
+}
+export function patchParticipant(id, patch) {
+  return updateDoc(doc(db, PARTICIPANTS_COL, String(id)), clean(patch));
+}
+export function removeParticipant(id) {
+  return deleteDoc(doc(db, PARTICIPANTS_COL, String(id)));
+}
+export async function seedParticipants(participantsArr) {
+  await Promise.all(
+    participantsArr.map((p) => setDoc(doc(db, PARTICIPANTS_COL, String(p.id)), clean(p))),
+  );
+}

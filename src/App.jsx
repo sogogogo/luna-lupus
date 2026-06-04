@@ -9,6 +9,7 @@ import {
 import {
   subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
   subscribeCustomers, seedCustomers,
+  subscribeParticipants, saveParticipant, patchParticipant, removeParticipant, seedParticipants,
 } from './lib/firestore';
 // =====================================================================
 // ブランドアイコン（base64 PNG・お客さん提供）
@@ -411,23 +412,31 @@ function AppInner() {
   const [view, setView] = useState('customer');
   const [sessions, setSessions] = useState([]);              // Firestore から読み込む（DB移行: sessions）
   const [sessionsLoading, setSessionsLoading] = useState(true);
-  const [participants, setParticipants] = useState(PARTICIPANTS_INIT);
+  const [participants, setParticipants] = useState([]);      // Firestore から読み込む（DB移行: participants）
   const [schedulePolls, setSchedulePolls] = useState(SCHEDULE_POLLS_INIT);   // 日程調整（フェーズ1: データモデル）
   const [pollResponses, setPollResponses] = useState(POLL_RESPONSES_INIT);   // 日程調整への回答
   const [announceHistory, setAnnounceHistory] = useState(ANNOUNCE_HISTORY_INIT); // 告知センターの配信履歴
   const [brandFilter, setBrandFilter] = useState('all');  // 参加者画面のブランドフィルタ（全画面背景にも反映）
 
-  // Firestore の sessions をリアルタイム購読（ステップ3: 書き込み反映も自動）
+  // Firestore の sessions / participants をリアルタイム購読（書き込み反映も自動）
   useEffect(() => {
-    const unsub = subscribeSessions(
+    const unsubS = subscribeSessions(
       rows => { setSessions(rows); setSessionsLoading(false); },
       () => { setSessionsLoading(false); toast.push('会データの読み込みに失敗しました', 'error'); },
     );
-    return () => unsub();
+    const unsubP = subscribeParticipants(
+      rows => setParticipants(rows),
+      () => toast.push('参加者データの読み込みに失敗しました', 'error'),
+    );
+    return () => { unsubS(); unsubP(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // participants のミューテータは Firestore へ書き込み、画面反映は onSnapshot に任せる
   const updateParticipant = (id, patch) => {
-    setParticipants(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
+    patchParticipant(id, patch).catch(() => toast.push('参加者の更新に失敗しました', 'error'));
+  };
+  const addParticipant = (newParticipant) => {
+    saveParticipant(newParticipant).catch(() => toast.push('参加登録に失敗しました', 'error'));
   };
   // sessions のミューテータは Firestore へ書き込み、画面反映は onSnapshot に任せる（local setSessions しない）
   const updateSession = (id, patch) => {
@@ -438,8 +447,10 @@ function AppInner() {
   };
   const deleteSession = (id) => {
     removeSession(id).catch(() => toast.push('会の削除に失敗しました', 'error'));
-    // participants は未移行のため、ローカル state からの紐づき削除のみ維持
-    setParticipants(prev => prev.filter(p => p.sessionId !== id));
+    // 紐づく参加者も Firestore から削除（ローカル participants から該当を抽出）
+    participants.filter(p => p.sessionId === id).forEach(p =>
+      removeParticipant(p.id).catch(() => {}),
+    );
   };
   // 日程調整のミューテータ（フェーズ1で用意・後続フェーズのUIから利用）
   const addSchedulePoll = (newPoll) => {
@@ -559,8 +570,8 @@ function AppInner() {
         {sessionsLoading
           ? <SessionsLoading />
           : view === 'customer'
-          ? <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} setParticipants={setParticipants} brandFilter={brandFilter} setBrandFilter={setBrandFilter} schedulePolls={schedulePolls} pollResponses={pollResponses} upsertPollResponse={upsertPollResponse} />
-          : <AdminView sessions={sessions} participants={participants} setParticipants={setParticipants} updateSession={updateSession} setSessions={setSessions} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />
+          ? <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} brandFilter={brandFilter} setBrandFilter={setBrandFilter} schedulePolls={schedulePolls} pollResponses={pollResponses} upsertPollResponse={upsertPollResponse} />
+          : <AdminView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />
         }
       </main>
     </div>
@@ -581,7 +592,7 @@ function SessionsLoading() {
 // =====================================================================
 // 参加者側
 // =====================================================================
-function CustomerView({ sessions, participants, updateParticipant, setParticipants, brandFilter, setBrandFilter, schedulePolls, pollResponses, upsertPollResponse }) {
+function CustomerView({ sessions, participants, updateParticipant, addParticipant, brandFilter, setBrandFilter, schedulePolls, pollResponses, upsertPollResponse }) {
   const [step, setStep] = useState('list');
   const [selected, setSelected] = useState(null);
   const [selectedPollId, setSelectedPollId] = useState(null);
@@ -715,7 +726,7 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
     />
   );
   if (step === 'mypage')   return <MyPage onBack={() => setStep('list')} sessions={sessions} participants={participants} myId={ME_ID} />;
-  if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => setStep('done')} myId={ME_ID} setParticipants={setParticipants} />;
+  if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => setStep('done')} myId={ME_ID} addParticipant={addParticipant} />;
   if (step === 'done' && selected)    return <BookingDone session={selected} onHome={() => { setStep('list'); setSelected(null); }} />;
   if (step === 'detail' && selected)  return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => setStep('confirm')} myParticipant={getMyParticipant(selected.id)} updateParticipant={updateParticipant} myId={ME_ID} />;
 
@@ -2551,7 +2562,7 @@ function CancelSection({ session, myParticipant, updateParticipant }) {
 }
 
 // ============ 予約フォーム / PayPay ============
-function ConfirmBooking({ session, onBack, onDone, myId, setParticipants }) {
+function ConfirmBooking({ session, onBack, onDone, myId, addParticipant }) {
   const [step, setStep] = useState('form');
   const [name, setName] = useState('佐藤 健');
   const [handle, setHandle] = useState('@takeru_jinrou');
@@ -2560,10 +2571,10 @@ function ConfirmBooking({ session, onBack, onDone, myId, setParticipants }) {
   const b = session.brand;
 
   const handlePaymentDone = () => {
-    // 実際に予約データに追加
+    // 実際に予約データに追加（Firestore へ書き込み・反映は onSnapshot）
     const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
     const newId = `p${Date.now()}`;
-    setParticipants(prev => [...prev, {
+    addParticipant({
       id: newId,
       sessionId: session.id,
       customerId: myId,
@@ -2574,7 +2585,7 @@ function ConfirmBooking({ session, onBack, onDone, myId, setParticipants }) {
       refunded: false,
       role: null,
       note: note || undefined,
-    }]);
+    });
     toast.push('予約と支払いが完了しました', 'success');
     onDone();
   };
@@ -2837,14 +2848,10 @@ function Stat({ label, value, unit, small }) {
 // =====================================================================
 // 管理者側
 // =====================================================================
-function AdminView({ sessions, participants, setParticipants, updateSession, setSessions, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, announceHistory, addAnnounce }) {
+function AdminView({ sessions, participants, updateParticipant, addParticipant, updateSession, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, announceHistory, addAnnounce }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
-
-  const updateParticipant = (id, patch) => {
-    setParticipants(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
-  };
 
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 80px' }}>
@@ -2873,11 +2880,11 @@ function AdminView({ sessions, participants, setParticipants, updateSession, set
       </div>
 
       {tab === 'dashboard' && <Dashboard sessions={sessions} participants={participants} />}
-      {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} addSession={addSession} setParticipants={setParticipants} addAnnounce={addAnnounce} />}
+      {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} addSession={addSession} addParticipant={addParticipant} addAnnounce={addAnnounce} />}
       {tab === 'sessions' && <SessionsAdmin sessions={sessions} participants={participants} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} />}
       {tab === 'payments' && <PaymentsAdmin sessions={sessions} participants={participants} updateParticipant={updateParticipant} />}
       {tab === 'roles' && (selectedSession
-        ? <RoleAssignment session={enrichSession(selectedSession)} participants={participants} updateParticipant={updateParticipant} onBack={() => setSelectedSession(null)} setParticipants={setParticipants} />
+        ? <RoleAssignment session={enrichSession(selectedSession)} participants={participants} updateParticipant={updateParticipant} onBack={() => setSelectedSession(null)} />
         : <RolesList sessions={sessions} participants={participants} onSelect={setSelectedSession} />)}
       {tab === 'announce' && <AnnouncementCenter sessions={sessions} participants={participants} history={announceHistory} addHistory={addAnnounce} />}
       {tab === 'customers' && (selectedCustomer
@@ -2982,7 +2989,7 @@ function PollCard({ poll, pollResponses, onClick }) {
   );
 }
 
-function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, addSession, setParticipants, addAnnounce }) {
+function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, addSession, addParticipant, addAnnounce }) {
   const toast = useToast();
   const [showClosed, setShowClosed] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -3029,7 +3036,7 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
       paid: false, paidAt: null,
       cancelled: false, refunded: false, role: null,
     }));
-    if (newParticipants.length) setParticipants(prev => [...prev, ...newParticipants]);
+    newParticipants.forEach(p => addParticipant(p));
 
     // ポールを確定済みに（プラン未定だった場合は確定時に選んだ plan/brand も反映）
     updateSchedulePoll(poll.id, { status: 'confirmed', confirmedIndex: colIdx, plan: planKey, brand: brandKey });
@@ -3806,8 +3813,9 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
                 await Promise.all([
                   seedSessions(SESSIONS_INIT),
                   seedCustomers(CUSTOMERS),
+                  seedParticipants(PARTICIPANTS_INIT),
                 ]);
-                toast.push('サンプルデータ（会・顧客）を Firestore に投入しました', 'success');
+                toast.push('サンプルデータ（会・顧客・参加者）を Firestore に投入しました', 'success');
               } catch { toast.push('投入に失敗しました（Firestoreルール/接続を確認）', 'error'); }
             }} style={{
               padding: '10px 14px', background: '#fff', border: '1px dashed #c9962a', color: '#c9962a',
@@ -4547,7 +4555,7 @@ function RolesList({ sessions, participants, onSelect }) {
 }
 
 // ============ 役職割り振り（詳細）============
-function RoleAssignment({ session, participants, updateParticipant, onBack, setParticipants }) {
+function RoleAssignment({ session, participants, updateParticipant, onBack }) {
   const [mode, setMode] = useState('manual');
   const [confirmFinalize, setConfirmFinalize] = useState(false);
   const toast = useToast();
@@ -4557,15 +4565,12 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
 
   const handleRandomAssign = () => {
     const shuffled = [...roleSet].sort(() => Math.random() - 0.5);
-    setParticipants(prev => prev.map(p => {
-      if (p.sessionId !== session.id || p.cancelled) return p;
-      const idx = sParts.findIndex(x => x.id === p.id);
-      return { ...p, role: shuffled[idx] || null };
-    }));
+    // 各参加者を Firestore へ個別更新（反映は onSnapshot）
+    sParts.forEach((p, idx) => updateParticipant(p.id, { role: shuffled[idx] || null }));
     toast.push('役職をランダムに割り振りました', 'success');
   };
   const handleClearAll = () => {
-    setParticipants(prev => prev.map(p => p.sessionId === session.id ? { ...p, role: null } : p));
+    participants.filter(p => p.sessionId === session.id && p.role).forEach(p => updateParticipant(p.id, { role: null }));
     toast.push('役職をクリアしました', 'info');
   };
   const handleFinalize = () => {

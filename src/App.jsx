@@ -2655,14 +2655,19 @@ function PollCard({ poll, pollResponses, onClick }) {
 }
 
 function SchedulePollsAdmin({ schedulePolls, pollResponses }) {
-  const toast = useToast();
   const [showClosed, setShowClosed] = useState(false);
+  const [selected, setSelected] = useState(null);
+
+  // selected は schedulePolls の最新を参照（将来の確定操作で内容が変わっても追従）
+  const selectedPoll = selected ? schedulePolls.find(p => p.id === selected) : null;
+  if (selectedPoll) {
+    return <PollAggregateView poll={selectedPoll} pollResponses={pollResponses} onBack={() => setSelected(null)} />;
+  }
 
   const active = schedulePolls.filter(p => p.status === 'open');
   const closed = schedulePolls.filter(p => p.status !== 'open');
 
-  // フェーズ3で集計表画面に差し替え予定（今はダミーのトースト）
-  const handleSelect = (poll) => toast.push(`「${poll.title}」の集計表は次のフェーズで実装予定です`, 'info');
+  const handleSelect = (poll) => setSelected(poll.id);
 
   return (
     <div style={{ animation: 'fadeUp 0.4s' }}>
@@ -2703,6 +2708,177 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============ 日程調整（集計表）============
+// 回答区分のカラー（ROLE_STYLES と同系の落ち着いた配色を流用）
+const ANSWER_STYLE = {
+  yes:   { mark: '◯', color: '#4a9968', bg: '#e6f3eb', label: '参加可' },
+  maybe: { mark: '△', color: '#c9962a', bg: '#fdf3d8', label: '調整可' },
+  no:    { mark: '×', color: '#d44a4a', bg: '#fde8e8', label: '不可' },
+  none:  { mark: '─', color: '#b0ada5', bg: '#f5f3ee', label: '未回答' },
+};
+
+function PollAggregateView({ poll, pollResponses, onBack }) {
+  const toast = useToast();
+  const brand = BRAND[poll.brand];
+  const accent = brand ? brand.primary : '#2c3140';
+  const HILITE = '#eef7f1'; // 最有力候補の薄い緑
+
+  // 対象顧客（公開=全顧客 / 招待制=招待された顧客）
+  const targets = poll.invitedCustomerIds
+    ? CUSTOMERS.filter(c => poll.invitedCustomerIds.includes(c.id))
+    : CUSTOMERS;
+
+  // customerId -> 回答
+  const resByCustomer = {};
+  pollResponses.filter(r => r.pollId === poll.id).forEach(r => { resByCustomer[r.customerId] = r; });
+  // answers のキーは candidateDates の添字（0,1,2...）
+  const answerOf = (customerId, colIdx) => {
+    const r = resByCustomer[customerId];
+    if (!r || !r.answers) return 'none';
+    return r.answers[colIdx] || 'none';
+  };
+
+  // 列ごとの集計
+  const colStats = poll.candidateDates.map((_, colIdx) => {
+    const s = { yes: 0, maybe: 0, no: 0, none: 0 };
+    targets.forEach(c => { s[answerOf(c.id, colIdx)]++; });
+    return s;
+  });
+  const maxYes = Math.max(0, ...colStats.map(s => s.yes));
+  const isTop = (colIdx) => maxYes > 0 && colStats[colIdx].yes === maxYes;
+
+  const respondedCount = targets.filter(c => resByCustomer[c.id]).length;
+  const confirmedDate = poll.status === 'confirmed' && poll.confirmedIndex != null ? poll.candidateDates[poll.confirmedIndex] : null;
+
+  const handleConfirm = (colIdx) => {
+    const cd = poll.candidateDates[colIdx];
+    toast.push(`${fmtMD(cd.date, cd.day)} の確定機能は次のフェーズで実装予定です`, 'info');
+  };
+
+  const th = { padding: '10px 12px', borderBottom: '2px solid #e8e5dd', fontSize: 11, fontWeight: 700, color: '#6b6e7a', whiteSpace: 'nowrap' };
+  const td = { padding: '9px 12px', borderBottom: '1px solid #f0ede5', textAlign: 'center', fontSize: 13 };
+
+  return (
+    <div style={{ animation: 'fadeUp 0.4s' }}>
+      <BackButton onClick={onBack} label="日程調整一覧へ戻る" accent={accent} />
+
+      {/* サマリ */}
+      <div style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 14, padding: 20, marginTop: 14, marginBottom: 18 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <span className="maru" style={{
+            width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+            background: brand ? `${brand.primary}1a` : '#eee', color: accent,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900,
+          }}>{BRAND_INITIAL[poll.brand] || '？'}</span>
+          <div>
+            <h2 className="maru" style={{ fontSize: 18, fontWeight: 900, color: '#2c3140' }}>{poll.title}</h2>
+            <div style={{ fontSize: 11, color: '#9499a8', fontWeight: 600 }}>{brand ? brand.name : ''} · {poll.createdBy}</div>
+          </div>
+          {poll.invitedCustomerIds && (
+            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: BRAND.closed.primary, fontWeight: 700, background: BRAND.closed.softer, padding: '4px 10px', borderRadius: 999 }}>
+              <Lock size={10} /> 招待制
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, fontSize: 12, color: '#6b6e7a', fontWeight: 600 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><CalendarDays size={13} /> 候補 <span className="num" style={{ color: '#2c3140', fontWeight: 700 }}>{poll.candidateDates.length}</span> 日程</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Users size={13} /> 回答 <span className="num" style={{ color: '#2c3140', fontWeight: 700 }}>{respondedCount}/{targets.length}</span> 人</span>
+          {confirmedDate
+            ? <span className="num" style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#4a9968', fontWeight: 700 }}><CheckCircle2 size={13} /> {fmtMD(confirmedDate.date, confirmedDate.day)} で確定</span>
+            : <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Clock size={13} /> 推奨期限 <span className="num" style={{ color: '#2c3140', fontWeight: 700 }}>{poll.deadline}</span></span>}
+        </div>
+        {poll.note && <div style={{ marginTop: 10, fontSize: 11, color: '#9499a8' }}>{poll.note}</div>}
+        {/* 凡例 */}
+        <div style={{ display: 'flex', gap: 14, marginTop: 12, paddingTop: 12, borderTop: '1px dashed #e0ddd6' }}>
+          {['yes', 'maybe', 'no', 'none'].map(k => (
+            <span key={k} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#6b6e7a', fontWeight: 600 }}>
+              <span style={{ color: ANSWER_STYLE[k].color, fontWeight: 900 }}>{ANSWER_STYLE[k].mark}</span> {ANSWER_STYLE[k].label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* 集計マトリクス */}
+      <div style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 14, overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', minWidth: 480 }}>
+          <thead>
+            <tr>
+              <th style={{ ...th, textAlign: 'left', position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>参加者</th>
+              {poll.candidateDates.map((cd, i) => (
+                <th key={i} style={{ ...th, textAlign: 'center', background: isTop(i) ? HILITE : '#fff' }}>
+                  <div className="maru" style={{ fontSize: 13, fontWeight: 700, color: '#2c3140' }}>{fmtMD(cd.date, cd.day)}</div>
+                  <div className="num" style={{ fontSize: 10, color: '#9499a8', marginTop: 2 }}>{cd.time}</div>
+                  {isTop(i) && <div style={{ fontSize: 9, color: '#4a9968', fontWeight: 700, marginTop: 2 }}>★ 最有力</div>}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {targets.map(c => {
+              const answered = !!resByCustomer[c.id];
+              return (
+                <tr key={c.id}>
+                  <td style={{ ...td, textAlign: 'left', position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 24, height: 24, borderRadius: '50%', flexShrink: 0, background: answered ? `${accent}1a` : '#f0ede5', color: answered ? accent : '#b0ada5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>{c.avatar}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: answered ? '#2c3140' : '#9499a8', whiteSpace: 'nowrap' }}>{c.name}</div>
+                        <div className="num" style={{ fontSize: 9, color: '#b0ada5', whiteSpace: 'nowrap' }}>{c.handle}</div>
+                      </div>
+                    </div>
+                  </td>
+                  {poll.candidateDates.map((_, colIdx) => {
+                    const a = answerOf(c.id, colIdx);
+                    const st = ANSWER_STYLE[a];
+                    return (
+                      <td key={colIdx} style={{ ...td, background: isTop(colIdx) ? HILITE : 'transparent' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 7, background: st.bg, color: st.color, fontWeight: 900, fontSize: 14 }}>{st.mark}</span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            {[
+              { key: 'yes',   label: '◯ 合計' },
+              { key: 'maybe', label: '△ 合計' },
+              { key: 'no',    label: '× 合計' },
+              { key: 'none',  label: '未回答' },
+            ].map((row, ri) => (
+              <tr key={row.key}>
+                <td style={{ ...td, textAlign: 'left', fontWeight: 700, fontSize: 11, color: ANSWER_STYLE[row.key].color, position: 'sticky', left: 0, background: '#faf9f6', borderTop: ri === 0 ? '2px solid #e8e5dd' : 'none' }}>{row.label}</td>
+                {colStats.map((s, colIdx) => (
+                  <td key={colIdx} className="num" style={{ ...td, fontWeight: 700, color: ANSWER_STYLE[row.key].color, background: isTop(colIdx) ? HILITE : '#faf9f6', borderTop: ri === 0 ? '2px solid #e8e5dd' : 'none' }}>{s[row.key]}</td>
+                ))}
+              </tr>
+            ))}
+            {/* 確定ボタン行 */}
+            <tr>
+              <td style={{ ...td, background: '#faf9f6', position: 'sticky', left: 0, borderBottom: 'none' }}></td>
+              {poll.candidateDates.map((cd, colIdx) => {
+                const isConfirmed = poll.confirmedIndex === colIdx;
+                return (
+                  <td key={colIdx} style={{ ...td, background: isTop(colIdx) ? HILITE : '#faf9f6', borderBottom: 'none', padding: '12px' }}>
+                    <button onClick={() => handleConfirm(colIdx)} disabled={isConfirmed} style={{
+                      padding: '7px 10px', width: '100%',
+                      background: isConfirmed ? '#e6f3eb' : accent,
+                      color: isConfirmed ? '#4a9968' : '#fff',
+                      border: 'none', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                      fontFamily: 'inherit', cursor: isConfirmed ? 'default' : 'pointer', whiteSpace: 'nowrap',
+                    }}>{isConfirmed ? '確定済み' : 'この日で確定'}</button>
+                  </td>
+                );
+              })}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </div>
   );
 }

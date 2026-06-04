@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# 環境変数（秘密情報・Firebase設定など）— .env.example のみコミット可
+.env
+.env.local
+.env.*.local
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

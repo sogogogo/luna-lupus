@@ -6,6 +6,7 @@ import {
   AlertTriangle, Bell, Hash, MessageCircle, Link2, Zap, MapPin, Lock, UserCheck, Plus,
   List, LayoutGrid, CalendarDays, ListChecks,
 } from 'lucide-react';
+import { fetchSessions, subscribeSessions, saveSession, patchSession, removeSession, seedSessions } from './lib/firestore';
 // =====================================================================
 // ブランドアイコン（base64 PNG・お客さん提供）
 // 単一ファイル完結のため、外部importせずここに埋め込み
@@ -381,13 +382,24 @@ export default function App() {
 }
 
 function AppInner() {
+  const toast = useToast();
   const [view, setView] = useState('customer');
-  const [sessions, setSessions] = useState(SESSIONS_INIT);
+  const [sessions, setSessions] = useState([]);              // Firestore から読み込む（DB移行: sessions）
+  const [sessionsLoading, setSessionsLoading] = useState(true);
   const [participants, setParticipants] = useState(PARTICIPANTS_INIT);
   const [schedulePolls, setSchedulePolls] = useState(SCHEDULE_POLLS_INIT);   // 日程調整（フェーズ1: データモデル）
   const [pollResponses, setPollResponses] = useState(POLL_RESPONSES_INIT);   // 日程調整への回答
   const [announceHistory, setAnnounceHistory] = useState(ANNOUNCE_HISTORY_INIT); // 告知センターの配信履歴
   const [brandFilter, setBrandFilter] = useState('all');  // 参加者画面のブランドフィルタ（全画面背景にも反映）
+
+  // 起動時に Firestore から sessions を読み込む（ステップ2: 読み取り）
+  useEffect(() => {
+    let active = true;
+    fetchSessions()
+      .then(rows => { if (active) { setSessions(rows); setSessionsLoading(false); } })
+      .catch(() => { if (active) { setSessionsLoading(false); toast.push('会データの読み込みに失敗しました', 'error'); } });
+    return () => { active = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateParticipant = (id, patch) => {
     setParticipants(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
@@ -517,11 +529,24 @@ function AppInner() {
       </header>
 
       <main>
-        {view === 'customer'
+        {sessionsLoading
+          ? <SessionsLoading />
+          : view === 'customer'
           ? <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} setParticipants={setParticipants} brandFilter={brandFilter} setBrandFilter={setBrandFilter} schedulePolls={schedulePolls} pollResponses={pollResponses} upsertPollResponse={upsertPollResponse} />
           : <AdminView sessions={sessions} participants={participants} setParticipants={setParticipants} updateSession={updateSession} setSessions={setSessions} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />
         }
       </main>
+    </div>
+  );
+}
+
+// 会データ読み込み中の表示（真っ白防止）
+function SessionsLoading() {
+  return (
+    <div className="fadeup" style={{ maxWidth: 1080, margin: '0 auto', padding: '120px 28px', textAlign: 'center' }}>
+      <div className="float" style={{ fontSize: 36, marginBottom: 14 }}>🗓️</div>
+      <div className="maru" style={{ fontSize: 16, fontWeight: 700, color: '#2c3140', marginBottom: 6 }}>会データを読み込んでいます…</div>
+      <div style={{ fontSize: 12, color: '#9499a8' }}>Firestore から開催スケジュールを取得中</div>
     </div>
   );
 }
@@ -3735,17 +3760,32 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
             }}><LayoutGrid size={12} /> カレンダー</button>
           </div>
         </div>
-        <button onClick={() => setCreating(true)} style={{
-          padding: '10px 18px', background: '#2c3140', border: 'none', color: '#fff',
-          borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
-          fontSize: 12, fontWeight: 700,
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-          transition: 'all 0.15s',
-        }}
-          onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(0,0,0,0.18)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)'; }}
-        ><Plus size={13} /> 新しい会を作成</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* 開発用：サンプル会データを Firestore に投入（本番ビルドでは非表示・冪等） */}
+          {import.meta.env.DEV && (
+            <button onClick={async () => {
+              try { await seedSessions(SESSIONS_INIT); toast.push('サンプルの会データを Firestore に投入しました', 'success'); }
+              catch { toast.push('投入に失敗しました（Firestoreルール/接続を確認）', 'error'); }
+            }} style={{
+              padding: '10px 14px', background: '#fff', border: '1px dashed #c9962a', color: '#c9962a',
+              borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }} title="開発用：SESSIONS_INIT を Firestore に投入">
+              <RotateCcw size={12} /> サンプル投入(DEV)
+            </button>
+          )}
+          <button onClick={() => setCreating(true)} style={{
+            padding: '10px 18px', background: '#2c3140', border: 'none', color: '#fff',
+            borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
+            fontSize: 12, fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+            transition: 'all 0.15s',
+          }}
+            onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(0,0,0,0.18)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)'; }}
+          ><Plus size={13} /> 新しい会を作成</button>
+        </div>
       </div>
 
       {viewMode === 'calendar' ? (

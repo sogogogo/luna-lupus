@@ -260,6 +260,13 @@ const POLL_RESPONSES_INIT = [
   { id: 'res7', pollId: 'poll3', customerId: 4, name: '高橋 由美',   handle: '@yumi_taka',     answers: { 0: 'yes',   1: 'yes'              }, comment: 'どちらも参加できます', respondedAt: '2026-05-27 12:30' },
 ];
 
+// 告知センターの配信履歴（AppInner で state 化し、日程確定などから自動追記する）
+const ANNOUNCE_HISTORY_INIT = [
+  { date: '2026-04-30 10:00', channel: 'アプリ内', target: '全ユーザー', subject: '5/10 ゲスト会「狼月シン」さん追加', count: 142 },
+  { date: '2026-04-28 18:00', channel: 'LINE一斉', target: '4/30 通常会 予約者', subject: '前日リマインド＋Zoomリンク再送', count: 12 },
+  { date: '2026-04-27 09:00', channel: 'X投稿', target: '一般', subject: '5月の開催スケジュール公開', count: '—' },
+];
+
 const ROLE_STYLES = {
   '人狼':   { color: '#d44a4a', bg: '#fde8e8', team: '人狼陣営' },
   '占い師': { color: '#3a8dc4', bg: '#e6f1f9', team: '村人陣営' },
@@ -379,6 +386,7 @@ function AppInner() {
   const [participants, setParticipants] = useState(PARTICIPANTS_INIT);
   const [schedulePolls, setSchedulePolls] = useState(SCHEDULE_POLLS_INIT);   // 日程調整（フェーズ1: データモデル）
   const [pollResponses, setPollResponses] = useState(POLL_RESPONSES_INIT);   // 日程調整への回答
+  const [announceHistory, setAnnounceHistory] = useState(ANNOUNCE_HISTORY_INIT); // 告知センターの配信履歴
   const [brandFilter, setBrandFilter] = useState('all');  // 参加者画面のブランドフィルタ（全画面背景にも反映）
 
   const updateParticipant = (id, patch) => {
@@ -413,6 +421,7 @@ function AppInner() {
         : [...prev, response];
     });
   };
+  const addAnnounce = (entry) => setAnnounceHistory(prev => [entry, ...prev]);
 
   // ブランドに応じたページ全体の背景
   const pageBg = useMemo(() => {
@@ -510,7 +519,7 @@ function AppInner() {
       <main>
         {view === 'customer'
           ? <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} setParticipants={setParticipants} brandFilter={brandFilter} setBrandFilter={setBrandFilter} />
-          : <AdminView sessions={sessions} participants={participants} setParticipants={setParticipants} updateSession={updateSession} setSessions={setSessions} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} />
+          : <AdminView sessions={sessions} participants={participants} setParticipants={setParticipants} updateSession={updateSession} setSessions={setSessions} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />
         }
       </main>
     </div>
@@ -2510,7 +2519,7 @@ function Stat({ label, value, unit, small }) {
 // =====================================================================
 // 管理者側
 // =====================================================================
-function AdminView({ sessions, participants, setParticipants, updateSession, setSessions, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll }) {
+function AdminView({ sessions, participants, setParticipants, updateSession, setSessions, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, announceHistory, addAnnounce }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
@@ -2546,13 +2555,13 @@ function AdminView({ sessions, participants, setParticipants, updateSession, set
       </div>
 
       {tab === 'dashboard' && <Dashboard sessions={sessions} participants={participants} />}
-      {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} />}
+      {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} addSession={addSession} setParticipants={setParticipants} addAnnounce={addAnnounce} />}
       {tab === 'sessions' && <SessionsAdmin sessions={sessions} participants={participants} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} />}
       {tab === 'payments' && <PaymentsAdmin sessions={sessions} participants={participants} updateParticipant={updateParticipant} />}
       {tab === 'roles' && (selectedSession
         ? <RoleAssignment session={enrichSession(selectedSession)} participants={participants} updateParticipant={updateParticipant} onBack={() => setSelectedSession(null)} setParticipants={setParticipants} />
         : <RolesList sessions={sessions} participants={participants} onSelect={setSelectedSession} />)}
-      {tab === 'announce' && <AnnouncementCenter sessions={sessions} participants={participants} />}
+      {tab === 'announce' && <AnnouncementCenter sessions={sessions} participants={participants} history={announceHistory} addHistory={addAnnounce} />}
       {tab === 'customers' && (selectedCustomer
         ? <CustomerDetail customer={selectedCustomer} onBack={() => setSelectedCustomer(null)} sessions={sessions} participants={participants} />
         : <CustomersAdmin onSelect={setSelectedCustomer} />)}
@@ -2654,11 +2663,67 @@ function PollCard({ poll, pollResponses, onClick }) {
   );
 }
 
-function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll }) {
+function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, addSession, setParticipants, addAnnounce }) {
   const toast = useToast();
   const [showClosed, setShowClosed] = useState(false);
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(null); // { mode: 'create' } | { mode: 'edit', poll }
+
+  // 候補日を確定 → 会作成・◯回答者を参加者登録・ポール更新・告知履歴追記
+  const confirmPoll = (poll, colIdx, opts = {}) => {
+    const cd = poll.candidateDates[colIdx];
+    const planKey = poll.plan || opts.planKey || null;
+    const planDef = planKey ? PLAN_DEFS[planKey] : null;
+    const brandKey = planDef ? planDef.brand : poll.brand;
+    const needsCustomPrice = planDef ? planDef.price === null : true;
+    const customPrice = needsCustomPrice ? (opts.customPrice != null ? Number(opts.customPrice) : (poll.customPrice ?? null)) : null;
+
+    // 会タイトル：イベント/クローズドのみポール title を customTitle として引き継ぐ。
+    // 通常プラン（okiraku/stepup/taimen）は customTitle を空にして plan ラベルを会タイトルにする
+    // （「〇〇の日程調整」という調整向けタイトルが通常会の名前に化けるのを防ぐ）
+    const carryTitle = brandKey === 'event' || brandKey === 'closed';
+
+    const sessionId = Date.now();
+    const newSession = {
+      id: sessionId,
+      date: cd.date, day: cd.day, time: cd.time,
+      plan: planKey,
+      gm: 'GM未設定', // 確定後に会の編集画面で設定する運用
+      platform: planDef ? (planDef.mode === 'offline' ? '対面' : 'Zoom') : 'Zoom',
+      meetingUrl: null,
+      guestName: null,
+      guestBio: null,
+      customTitle: carryTitle ? (poll.title || null) : null,
+      customPrice,
+      invitedCustomerIds: poll.invitedCustomerIds || [],
+      status: 'open',
+      fromPollId: poll.id, // 由来をたどれるように
+    };
+    addSession(newSession);
+
+    // ◯回答者を参加者として自動登録（未払い）
+    const yesResponders = pollResponses.filter(r => r.pollId === poll.id && r.answers && r.answers[colIdx] === 'yes');
+    const newParticipants = yesResponders.map(r => ({
+      id: `p${sessionId}_${r.customerId}`,
+      sessionId, customerId: r.customerId,
+      name: r.name, handle: r.handle,
+      paid: false, paidAt: null,
+      cancelled: false, refunded: false, role: null,
+    }));
+    if (newParticipants.length) setParticipants(prev => [...prev, ...newParticipants]);
+
+    // ポールを確定済みに（プラン未定だった場合は確定時に選んだ plan/brand も反映）
+    updateSchedulePoll(poll.id, { status: 'confirmed', confirmedIndex: colIdx, plan: planKey, brand: brandKey });
+
+    // 告知センター履歴に自動エントリ
+    addAnnounce({
+      date: nowISO(), channel: '日程確定', target: poll.title,
+      subject: `日程調整「${poll.title}」を確定（${fmtMD(cd.date, cd.day)}開催）`,
+      count: newParticipants.length,
+    });
+
+    toast.push(`日程を確定し、参加者 ${newParticipants.length} 名を登録しました`, 'success');
+  };
 
   // selected は schedulePolls の最新を参照（将来の確定操作で内容が変わっても追従）
   const selectedPoll = selected ? schedulePolls.find(p => p.id === selected) : null;
@@ -2684,7 +2749,7 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
   if (selectedPoll) {
     return (
       <>
-        <PollAggregateView poll={selectedPoll} pollResponses={pollResponses} onBack={() => setSelected(null)} onEdit={() => setEditing({ mode: 'edit', poll: selectedPoll })} />
+        <PollAggregateView poll={selectedPoll} pollResponses={pollResponses} onBack={() => setSelected(null)} onEdit={() => setEditing({ mode: 'edit', poll: selectedPoll })} onConfirm={(colIdx, opts) => confirmPoll(selectedPoll, colIdx, opts)} />
         {editModal}
       </>
     );
@@ -2992,8 +3057,8 @@ const ANSWER_STYLE = {
   none:  { mark: '─', color: '#b0ada5', bg: '#f5f3ee', label: '未回答' },
 };
 
-function PollAggregateView({ poll, pollResponses, onBack, onEdit }) {
-  const toast = useToast();
+function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm }) {
+  const [confirmingIndex, setConfirmingIndex] = useState(null);
   const brand = BRAND[poll.brand];
   const accent = brand ? brand.primary : '#2c3140';
   const HILITE = '#eef7f1'; // 最有力候補の薄い緑
@@ -3025,10 +3090,7 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit }) {
   const respondedCount = targets.filter(c => resByCustomer[c.id]).length;
   const confirmedDate = poll.status === 'confirmed' && poll.confirmedIndex != null ? poll.candidateDates[poll.confirmedIndex] : null;
 
-  const handleConfirm = (colIdx) => {
-    const cd = poll.candidateDates[colIdx];
-    toast.push(`${fmtMD(cd.date, cd.day)} の確定機能は次のフェーズで実装予定です`, 'info');
-  };
+  const alreadyConfirmed = poll.status === 'confirmed';
 
   const th = { padding: '10px 12px', borderBottom: '2px solid #e8e5dd', fontSize: 11, fontWeight: 700, color: '#6b6e7a', whiteSpace: 'nowrap' };
   const td = { padding: '9px 12px', borderBottom: '1px solid #f0ede5', textAlign: 'center', fontSize: 13 };
@@ -3143,14 +3205,15 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit }) {
               <td style={{ ...td, background: '#faf9f6', position: 'sticky', left: 0, borderBottom: 'none' }}></td>
               {poll.candidateDates.map((cd, colIdx) => {
                 const isConfirmed = poll.confirmedIndex === colIdx;
+                const disabled = alreadyConfirmed; // 確定後は他候補での確定も不可
                 return (
                   <td key={colIdx} style={{ ...td, background: isTop(colIdx) ? HILITE : '#faf9f6', borderBottom: 'none', padding: '12px' }}>
-                    <button onClick={() => handleConfirm(colIdx)} disabled={isConfirmed} style={{
+                    <button onClick={() => !disabled && setConfirmingIndex(colIdx)} disabled={disabled} style={{
                       padding: '7px 10px', width: '100%',
-                      background: isConfirmed ? '#e6f3eb' : accent,
-                      color: isConfirmed ? '#4a9968' : '#fff',
+                      background: isConfirmed ? '#e6f3eb' : (disabled ? '#eceae4' : accent),
+                      color: isConfirmed ? '#4a9968' : (disabled ? '#b0ada5' : '#fff'),
                       border: 'none', borderRadius: 8, fontSize: 11, fontWeight: 700,
-                      fontFamily: 'inherit', cursor: isConfirmed ? 'default' : 'pointer', whiteSpace: 'nowrap',
+                      fontFamily: 'inherit', cursor: disabled ? 'default' : 'pointer', whiteSpace: 'nowrap',
                     }}>{isConfirmed ? '確定済み' : 'この日で確定'}</button>
                   </td>
                 );
@@ -3159,7 +3222,109 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit }) {
           </tfoot>
         </table>
       </div>
+
+      {confirmingIndex != null && (
+        <PollConfirmModal
+          poll={poll}
+          colIdx={confirmingIndex}
+          pollResponses={pollResponses}
+          onConfirm={(opts) => { onConfirm?.(confirmingIndex, opts); setConfirmingIndex(null); }}
+          onClose={() => setConfirmingIndex(null)}
+        />
+      )}
     </div>
+  );
+}
+
+// ============ 日程調整（確定ダイアログ）============
+function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
+  const cd = poll.candidateDates[colIdx];
+  // プラン未定なら確定時にプラン選択必須
+  const [planKey, setPlanKey] = useState(poll.plan || '');
+  const plan = planKey ? PLAN_DEFS[planKey] : null;
+  const brand = plan ? BRAND[plan.brand] : null;
+  const accent = brand ? brand.primary : '#6b5dc7';
+  const needsPlan = !poll.plan; // 元々未定だった場合のみ選択UIを出す
+  const needsPrice = plan ? plan.price === null : false;
+  const [customPrice, setCustomPrice] = useState(poll.customPrice ?? '');
+
+  // この候補日に対する回答内訳
+  const responses = pollResponses.filter(r => r.pollId === poll.id);
+  const countBy = (val) => responses.filter(r => r.answers && r.answers[colIdx] === val).length;
+  const yesN = countBy('yes'), maybeN = countBy('maybe'), noN = countBy('no');
+
+  const planLabel = plan ? plan.label : poll.title;
+  const canConfirm = (!needsPlan || planKey) && (!needsPrice || customPrice !== '');
+
+  const handleConfirm = () => {
+    if (!canConfirm) return;
+    onConfirm({ planKey: planKey || null, customPrice: needsPrice ? customPrice : undefined });
+  };
+
+  const checkLine = (color, text) => (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: '#2c3140', lineHeight: 1.6 }}>
+      <Check size={14} color={color} strokeWidth={3} style={{ marginTop: 2, flexShrink: 0 }} /> <span>{text}</span>
+    </div>
+  );
+
+  return (
+    <ModalShell onClose={onClose} maxWidth={440}>
+      <ModalHeader title="日程を確定" icon={<CheckCircle2 size={16} />} onClose={onClose} accent={accent} />
+      <div style={{ flex: 1, overflow: 'auto', padding: '18px 24px' }}>
+        <div style={{ fontSize: 13, color: '#2c3140', fontWeight: 600, lineHeight: 1.7, marginBottom: 16 }}>
+          「<span className="num" style={{ color: accent, fontWeight: 700 }}>{fmtMD(cd.date, cd.day)} {cd.time}</span>」で確定し、<br />
+          <span style={{ fontWeight: 700 }}>{planLabel}</span> として正式な会を作成します。
+        </div>
+
+        {/* プラン選択（未定だった場合のみ・必須） */}
+        {needsPlan && (
+          <div style={{ marginBottom: 16, padding: 12, background: '#faf9f6', borderRadius: 10, border: '1px solid #e8e5dd' }}>
+            <FieldLabel>会のタイプを選択（必須）</FieldLabel>
+            <select value={planKey} onChange={(e) => setPlanKey(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
+              <option value="">選択してください</option>
+              {Object.entries(BRAND).map(([brandKey, b]) => (
+                <optgroup key={brandKey} label={b.name}>
+                  {Object.entries(PLAN_DEFS).filter(([, pd]) => pd.brand === brandKey).map(([k, pd]) => (
+                    <option key={k} value={k}>{pd.label}（{pd.price !== null ? fmtYen(pd.price) : '都度設定'}）</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* 参加費（プランが都度設定の場合・必須） */}
+        {needsPrice && (
+          <div style={{ marginBottom: 16 }}>
+            <FieldLabel>参加費（必須）</FieldLabel>
+            <input type="number" value={customPrice} onChange={(e) => setCustomPrice(e.target.value)} placeholder="例: 4000" style={inputStyle} />
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gap: 9, padding: '14px 16px', background: '#f6f8f6', borderRadius: 10, border: '1px solid #e0e8e0' }}>
+          {checkLine('#4a9968', <>◯回答した <b className="num">{yesN}</b> 名を参加者として自動登録</>)}
+          {checkLine('#c9962a', <>△回答した <b className="num">{maybeN}</b> 名には参加確認の通知を送る</>)}
+          {checkLine('#d44a4a', <>×回答した <b className="num">{noN}</b> 名には確定日のみ通知</>)}
+        </div>
+      </div>
+
+      <div style={{ padding: 16, borderTop: '1px solid #f0ede5', display: 'flex', gap: 8 }}>
+        <button onClick={onClose} style={{
+          flex: 1, padding: 11, background: '#fff', border: '1px solid #d4d0c8',
+          color: '#2c3140', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+        }}>キャンセル</button>
+        <button onClick={handleConfirm} disabled={!canConfirm} style={{
+          flex: 2, padding: 11,
+          background: canConfirm ? `linear-gradient(135deg, ${accent}, ${brand ? brand.accent : '#3fb8d4'})` : '#e0ddd6',
+          border: 'none', color: '#fff', borderRadius: 8,
+          cursor: canConfirm ? 'pointer' : 'not-allowed',
+          fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+        }}>
+          <Check size={13} /> この内容で確定
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 
@@ -3568,6 +3733,7 @@ function SessionFormModal({ mode, initial, onSave, onClose }) {
 
         <Field label="GM *">
           <select value={gm} onChange={(e) => setGm(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
+            <option value="GM未設定">GM未設定</option>
             <option value="夜霧GM">夜霧GM</option>
             <option value="月影GM">月影GM</option>
             <option value="黒猫GM">黒猫GM</option>
@@ -4224,7 +4390,7 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
 }
 
 // ============ 告知センター ============
-function AnnouncementCenter({ sessions, participants }) {
+function AnnouncementCenter({ sessions, participants, history, addHistory }) {
   const upcoming = sessions.filter(s => s.status === 'open');
   const [target, setTarget] = useState(upcoming[0]?.id);
   const targetRaw = sessions.find(s => s.id === target);
@@ -4232,18 +4398,11 @@ function AnnouncementCenter({ sessions, participants }) {
   const [tab, setTab] = useState('compose');
   const [broadcastChannel, setBroadcastChannel] = useState(null); // 'app' | 'line' | 'remind'
   const [autoSettingsOpen, setAutoSettingsOpen] = useState(false);
-  const [history, setHistory] = useState([
-    { date: '2026-04-30 10:00', channel: 'アプリ内', target: '全ユーザー', subject: '5/10 ゲスト会「狼月シン」さん追加', count: 142 },
-    { date: '2026-04-28 18:00', channel: 'LINE一斉', target: '4/30 通常会 予約者', subject: '前日リマインド＋Zoomリンク再送', count: 12 },
-    { date: '2026-04-27 09:00', channel: 'X投稿', target: '一般', subject: '5月の開催スケジュール公開', count: '—' },
-  ]);
   const toast = useToast();
 
   const xPost = targetSession ? generateXPost(targetSession) : '';
   const linePost = targetSession ? generateLinePost(targetSession) : '';
   const targetCount = targetSession ? participants.filter(p => p.sessionId === targetSession.id && !p.cancelled).length : 0;
-
-  const addHistory = (entry) => setHistory(prev => [entry, ...prev]);
 
   return (
     <div className="fadeup">

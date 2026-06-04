@@ -518,7 +518,7 @@ function AppInner() {
 
       <main>
         {view === 'customer'
-          ? <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} setParticipants={setParticipants} brandFilter={brandFilter} setBrandFilter={setBrandFilter} />
+          ? <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} setParticipants={setParticipants} brandFilter={brandFilter} setBrandFilter={setBrandFilter} schedulePolls={schedulePolls} pollResponses={pollResponses} upsertPollResponse={upsertPollResponse} />
           : <AdminView sessions={sessions} participants={participants} setParticipants={setParticipants} updateSession={updateSession} setSessions={setSessions} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />
         }
       </main>
@@ -529,9 +529,10 @@ function AppInner() {
 // =====================================================================
 // 参加者側
 // =====================================================================
-function CustomerView({ sessions, participants, updateParticipant, setParticipants, brandFilter, setBrandFilter }) {
+function CustomerView({ sessions, participants, updateParticipant, setParticipants, brandFilter, setBrandFilter, schedulePolls, pollResponses, upsertPollResponse }) {
   const [step, setStep] = useState('list');
   const [selected, setSelected] = useState(null);
+  const [selectedPollId, setSelectedPollId] = useState(null);
   const filter = brandFilter;
   const setFilter = setBrandFilter;
   const [announceOpen, setAnnounceOpen] = useState(false);
@@ -621,6 +622,14 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
   const bookedSessionIds = new Set(myBookings.filter(b => !b.cancelled).map(b => b.sessionId));
   const getMyParticipant = (sid) => participants.find(p => p.sessionId === sid && p.customerId === ME_ID);
 
+  // ====== 日程調整：自分宛て（公開 or 自分が招待された招待制）かつ募集中のみ ======
+  const myPolls = (schedulePolls || []).filter(p =>
+    p.status === 'open' && (!p.invitedCustomerIds || p.invitedCustomerIds.includes(ME_ID))
+  );
+  const hasAnswered = (pollId) => (pollResponses || []).some(r => r.pollId === pollId && r.customerId === ME_ID);
+  const unansweredPolls = myPolls.filter(p => !hasAnswered(p.id));
+  const selectedPoll = selectedPollId ? schedulePolls.find(p => p.id === selectedPollId) : null;
+
   // ゲスト出演がある会（フィルタに連動）
   const guestSessions = filtered.filter(s => s.guestName);
   // クローズドで自分が招待されている会（フィルタに連動。ただしフィルタが all かつ検索なしの時のみ表示）
@@ -635,6 +644,24 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
     taimen: visibleSessions.filter(s => s.brand.key === 'taimen').length,
   };
 
+  if (step === 'pollAnswer' && selectedPoll) return (
+    <CustomerPollAnswer
+      poll={selectedPoll}
+      pollResponses={pollResponses}
+      myId={ME_ID}
+      onBack={() => { setStep('polls'); setSelectedPollId(null); }}
+      onSubmit={(response) => { upsertPollResponse(response); setStep('polls'); setSelectedPollId(null); }}
+    />
+  );
+  if (step === 'polls') return (
+    <CustomerPollList
+      polls={myPolls}
+      pollResponses={pollResponses}
+      myId={ME_ID}
+      onBack={() => setStep('list')}
+      onSelect={(pid) => { setSelectedPollId(pid); setStep('pollAnswer'); }}
+    />
+  );
   if (step === 'mypage')   return <MyPage onBack={() => setStep('list')} sessions={sessions} participants={participants} myId={ME_ID} />;
   if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => setStep('done')} myId={ME_ID} setParticipants={setParticipants} />;
   if (step === 'done' && selected)    return <BookingDone session={selected} onHome={() => { setStep('list'); setSelected(null); }} />;
@@ -698,6 +725,37 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
       <section style={{ marginBottom: 24 }}>
         <BrandTabs filter={filter} setFilter={setFilter} counts={brandCounts} />
       </section>
+
+      {/* 日程調整バナー：未回答があれば目立つカードで誘導 */}
+      {myPolls.length > 0 && (
+        <button onClick={() => setStep('polls')} style={{
+          width: '100%', textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit',
+          display: 'flex', alignItems: 'center', gap: 14, marginBottom: 28,
+          padding: '16px 20px', borderRadius: 14,
+          background: unansweredPolls.length > 0 ? 'linear-gradient(135deg, #fef9e8 0%, #fff4d6 100%)' : '#fff',
+          border: `1.5px solid ${unansweredPolls.length > 0 ? '#f5c542' : '#e8e5dd'}`,
+          transition: 'transform 0.2s, box-shadow 0.2s',
+        }}
+          onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.06)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
+        >
+          <span style={{ fontSize: 26, flexShrink: 0 }}>📋</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="maru" style={{ fontSize: 15, fontWeight: 900, color: '#2c3140', display: 'flex', alignItems: 'center', gap: 8 }}>
+              日程調整
+              {unansweredPolls.length > 0 && (
+                <span className="num" style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: '#e8645f', borderRadius: 999, padding: '2px 9px' }}>未回答 {unansweredPolls.length}</span>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: '#6b6e7a', marginTop: 3 }}>
+              {unansweredPolls.length > 0
+                ? `未回答の調整が ${unansweredPolls.length} 件あります`
+                : `あなた宛ての日程調整 ${myPolls.length} 件（すべて回答済み）`}
+            </div>
+          </div>
+          <ChevronRight size={20} color="#9499a8" style={{ flexShrink: 0 }} />
+        </button>
+      )}
 
       {/* 検索・絞り込みパネル */}
       {searchOpen && (
@@ -889,6 +947,206 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
       )}
 
       {announceOpen && <AnnouncementModal onClose={() => setAnnounceOpen(false)} />}
+    </div>
+  );
+}
+
+// ============ 参加者：日程調整 回答待ちリスト ============
+function CustomerPollList({ polls, pollResponses, myId, onBack, onSelect }) {
+  const answeredOf = (pid) => (pollResponses || []).some(r => r.pollId === pid && r.customerId === myId);
+
+  return (
+    <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
+      <BackButton onClick={onBack} label="ホームに戻る" accent="#6b5dc7" />
+      <h2 className="maru" style={{ fontSize: 22, fontWeight: 900, color: '#2c3140', margin: '18px 0 4px' }}>日程調整</h2>
+      <p style={{ fontSize: 12, color: '#6b6e7a', marginBottom: 22 }}>参加できる候補日を回答してください。あなたの回答が開催日の決定に使われます。</p>
+
+      {polls.length === 0 ? (
+        <div style={{ padding: '50px 20px', textAlign: 'center', color: '#9499a8', fontSize: 13, background: '#fff', border: '1px dashed #e0ddd6', borderRadius: 14 }}>
+          あなた宛ての日程調整はありません
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 12 }}>
+          {polls.map(poll => {
+            const answered = answeredOf(poll.id);
+            const brand = poll.brand ? BRAND[poll.brand] : null;
+            return (
+              <button key={poll.id} onClick={() => onSelect(poll.id)} style={{
+                textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', width: '100%',
+                display: 'flex', alignItems: 'center', gap: 12, padding: 16,
+                background: '#fff', border: `1.5px solid ${answered ? '#e8e5dd' : '#f5c542'}`, borderRadius: 14,
+                transition: 'transform 0.2s, box-shadow 0.2s',
+              }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.06)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'none'; }}
+              >
+                <span className="maru" style={{
+                  width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+                  background: brand ? `${brand.primary}1a` : '#eee', color: brand ? brand.primary : '#6b6e7a',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900,
+                }}>{BRAND_INITIAL[poll.brand] || '？'}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="maru" style={{ fontSize: 14, fontWeight: 700, color: '#2c3140' }}>{poll.title}</div>
+                  <div style={{ fontSize: 11, color: '#9499a8', fontWeight: 600, marginTop: 2 }}>
+                    {brand ? brand.name + ' · ' : ''}候補 {poll.candidateDates.length} 日程{poll.deadline ? ` · 〜${poll.deadline}` : ''}
+                  </div>
+                </div>
+                <span style={{
+                  flexShrink: 0, fontSize: 11, fontWeight: 700, padding: '4px 11px', borderRadius: 999,
+                  background: answered ? '#e6f3eb' : '#fdeceb', color: answered ? '#4a9968' : '#e8645f',
+                }}>{answered ? '回答済み' : '未回答'}</span>
+                <ChevronRight size={18} color="#cfcbc2" style={{ flexShrink: 0 }} />
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============ 参加者：日程調整 回答画面 ============
+function CustomerPollAnswer({ poll, pollResponses, myId, onBack, onSubmit }) {
+  const toast = useToast();
+  const brand = poll.brand ? BRAND[poll.brand] : null;
+  const accent = brand ? brand.primary : '#6b5dc7';
+  const me = CUSTOMERS.find(c => c.id === myId);
+  const existing = (pollResponses || []).find(r => r.pollId === poll.id && r.customerId === myId);
+  const isPublic = !poll.invitedCustomerIds; // 公開ポールのみ他の人の回答を表示
+
+  const [answers, setAnswers] = useState(() => ({ ...(existing?.answers || {}) }));
+  const [showOthers, setShowOthers] = useState(false);
+
+  const setAns = (idx, val) => setAnswers(prev => ({ ...prev, [idx]: prev[idx] === val ? undefined : val }));
+  const answeredCount = Object.values(answers).filter(Boolean).length;
+  const canSubmit = answeredCount >= 1;
+
+  // 他の人の回答集計（自分含む全回答）
+  const allResponses = (pollResponses || []).filter(r => r.pollId === poll.id);
+  const aggOf = (idx) => {
+    const s = { yes: 0, maybe: 0, no: 0 };
+    allResponses.forEach(r => { const a = r.answers?.[idx]; if (a && s[a] != null) s[a]++; });
+    return s;
+  };
+
+  const submit = () => {
+    if (!canSubmit) return;
+    const cleaned = {};
+    Object.entries(answers).forEach(([k, v]) => { if (v) cleaned[k] = v; });
+    onSubmit({
+      id: existing?.id || `res${Date.now()}`,
+      pollId: poll.id, customerId: myId,
+      name: me?.name || '', handle: me?.handle || '',
+      answers: cleaned,
+      comment: existing?.comment || '',
+      respondedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
+    });
+    toast.push('回答を送信しました', 'success');
+  };
+
+  const CHOICES = [
+    { v: 'yes', mark: '◯', label: '参加可' },
+    { v: 'maybe', mark: '△', label: '調整可' },
+    { v: 'no', mark: '×', label: '不可' },
+  ];
+
+  return (
+    <div className="fadeup" style={{ maxWidth: 560, margin: '0 auto', padding: '32px 28px 120px' }}>
+      <BackButton onClick={onBack} label="回答リストへ戻る" accent={accent} />
+
+      {/* ヘッダー */}
+      <div style={{ marginTop: 18, marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <span className="maru" style={{
+            width: 28, height: 28, borderRadius: 7, flexShrink: 0,
+            background: brand ? `${brand.primary}1a` : '#eee', color: accent,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 900,
+          }}>{BRAND_INITIAL[poll.brand] || '？'}</span>
+          <span style={{ fontSize: 11, color: '#9499a8', fontWeight: 700 }}>{brand ? brand.name : '会のタイプ未定'}</span>
+        </div>
+        <h2 className="maru" style={{ fontSize: 21, fontWeight: 900, color: '#2c3140', margin: '0 0 6px' }}>{poll.title}</h2>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 12, color: '#6b6e7a', fontWeight: 600 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><CalendarDays size={13} /> 候補 {poll.candidateDates.length} 日程</span>
+          {poll.deadline && <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Clock size={13} /> 推奨期限 <span className="num">{poll.deadline}</span></span>}
+        </div>
+        {poll.note && <div style={{ marginTop: 10, padding: '10px 12px', background: '#faf9f6', borderRadius: 8, fontSize: 11, color: '#6b6e7a' }}>{poll.note}</div>}
+      </div>
+
+      {/* 候補日ごとの ◯△× トグル */}
+      <div style={{ display: 'grid', gap: 12 }}>
+        {poll.candidateDates.map((cd, idx) => (
+          <div key={idx} style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 14, padding: 16 }}>
+            <div className="maru" style={{ fontSize: 15, fontWeight: 700, color: '#2c3140', marginBottom: 2 }}>{fmtMD(cd.date, cd.day)}</div>
+            <div className="num" style={{ fontSize: 12, color: '#9499a8', marginBottom: 12 }}>{cd.time}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {CHOICES.map(ch => {
+                const active = answers[idx] === ch.v;
+                const st = ANSWER_STYLE[ch.v];
+                return (
+                  <button key={ch.v} onClick={() => setAns(idx, ch.v)} style={{
+                    padding: '12px 4px', borderRadius: 10, cursor: 'pointer', fontFamily: 'inherit',
+                    background: active ? st.bg : '#fff',
+                    border: `2px solid ${active ? st.color : '#e8e5dd'}`,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, transition: 'all 0.15s',
+                  }}>
+                    <span style={{ fontSize: 24, fontWeight: 900, color: active ? st.color : '#cfcbc2' }}>{ch.mark}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: active ? st.color : '#9499a8' }}>{ch.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 他の人の回答（公開ポールのみ） */}
+            {showOthers && isPublic && (() => {
+              const agg = aggOf(idx);
+              const total = agg.yes + agg.maybe + agg.no;
+              return (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed #e0ddd6' }}>
+                  <div style={{ display: 'flex', height: 8, borderRadius: 999, overflow: 'hidden', background: '#f0ede5', marginBottom: 6 }}>
+                    {total > 0 && ['yes', 'maybe', 'no'].map(k => agg[k] > 0 && (
+                      <div key={k} style={{ width: `${(agg[k] / total) * 100}%`, background: ANSWER_STYLE[k].color }} />
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#6b6e7a', fontWeight: 600 }}>
+                    {['yes', 'maybe', 'no'].map(k => (
+                      <span key={k} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <span style={{ color: ANSWER_STYLE[k].color, fontWeight: 900 }}>{ANSWER_STYLE[k].mark}</span>
+                        <span className="num">{agg[k]}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        ))}
+      </div>
+
+      {/* 他の人の回答を見る（公開ポールのみ） */}
+      {isPublic && allResponses.length > 0 && (
+        <button onClick={() => setShowOthers(v => !v)} style={{
+          marginTop: 14, display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none',
+          cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, color: accent, padding: '6px 0',
+        }}>
+          <ChevronRight size={14} style={{ transform: showOthers ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
+          {showOthers ? '他の人の回答を隠す' : `他の人の回答を見る（${allResponses.length}名）`}
+        </button>
+      )}
+
+      {/* 送信ボタン（下部固定風） */}
+      <div style={{ marginTop: 24 }}>
+        <button onClick={submit} disabled={!canSubmit} style={{
+          width: '100%', padding: 15,
+          background: canSubmit ? `linear-gradient(135deg, ${accent}, ${brand ? brand.accent : '#3fb8d4'})` : '#e0ddd6',
+          border: 'none', color: '#fff', borderRadius: 12,
+          cursor: canSubmit ? 'pointer' : 'not-allowed',
+          fontFamily: 'inherit', fontSize: 14, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}>
+          <Check size={16} /> {existing ? '回答を更新' : '回答を送信'}
+        </button>
+        {!canSubmit && <div style={{ textAlign: 'center', fontSize: 11, color: '#9499a8', marginTop: 8 }}>少なくとも1つの候補日に回答してください</div>}
+      </div>
     </div>
   );
 }

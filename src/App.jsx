@@ -510,7 +510,7 @@ function AppInner() {
       <main>
         {view === 'customer'
           ? <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} setParticipants={setParticipants} brandFilter={brandFilter} setBrandFilter={setBrandFilter} />
-          : <AdminView sessions={sessions} participants={participants} setParticipants={setParticipants} updateSession={updateSession} setSessions={setSessions} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} />
+          : <AdminView sessions={sessions} participants={participants} setParticipants={setParticipants} updateSession={updateSession} setSessions={setSessions} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} />
         }
       </main>
     </div>
@@ -2510,7 +2510,7 @@ function Stat({ label, value, unit, small }) {
 // =====================================================================
 // 管理者側
 // =====================================================================
-function AdminView({ sessions, participants, setParticipants, updateSession, setSessions, addSession, deleteSession, schedulePolls, pollResponses }) {
+function AdminView({ sessions, participants, setParticipants, updateSession, setSessions, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
@@ -2546,7 +2546,7 @@ function AdminView({ sessions, participants, setParticipants, updateSession, set
       </div>
 
       {tab === 'dashboard' && <Dashboard sessions={sessions} participants={participants} />}
-      {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} />}
+      {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} />}
       {tab === 'sessions' && <SessionsAdmin sessions={sessions} participants={participants} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} />}
       {tab === 'payments' && <PaymentsAdmin sessions={sessions} participants={participants} updateParticipant={updateParticipant} />}
       {tab === 'roles' && (selectedSession
@@ -2654,14 +2654,40 @@ function PollCard({ poll, pollResponses, onClick }) {
   );
 }
 
-function SchedulePollsAdmin({ schedulePolls, pollResponses }) {
+function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll }) {
+  const toast = useToast();
   const [showClosed, setShowClosed] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [editing, setEditing] = useState(null); // { mode: 'create' } | { mode: 'edit', poll }
 
   // selected は schedulePolls の最新を参照（将来の確定操作で内容が変わっても追従）
   const selectedPoll = selected ? schedulePolls.find(p => p.id === selected) : null;
+
+  const editModal = editing && (
+    <SchedulePollFormModal
+      mode={editing.mode}
+      initial={editing.mode === 'edit' ? editing.poll : null}
+      onSave={(poll) => {
+        if (editing.mode === 'edit') {
+          updateSchedulePoll(poll.id, poll);
+          toast.push('日程調整を更新しました', 'success');
+        } else {
+          addSchedulePoll(poll);
+          toast.push(`「${poll.title}」を作成しました`, 'success');
+        }
+        setEditing(null);
+      }}
+      onClose={() => setEditing(null)}
+    />
+  );
+
   if (selectedPoll) {
-    return <PollAggregateView poll={selectedPoll} pollResponses={pollResponses} onBack={() => setSelected(null)} />;
+    return (
+      <>
+        <PollAggregateView poll={selectedPoll} pollResponses={pollResponses} onBack={() => setSelected(null)} onEdit={() => setEditing({ mode: 'edit', poll: selectedPoll })} />
+        {editModal}
+      </>
+    );
   }
 
   const active = schedulePolls.filter(p => p.status === 'open');
@@ -2674,7 +2700,16 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
         <h2 className="maru" style={{ fontSize: 18, fontWeight: 900, color: '#2c3140' }}>日程調整</h2>
         <span style={{ fontSize: 11, color: '#9499a8', fontWeight: 600 }}>候補日を提示して参加可否を集める</span>
+        <button onClick={() => setEditing({ mode: 'create' })} style={{
+          marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6,
+          padding: '9px 16px', background: 'linear-gradient(135deg, #6b5dc7, #3fb8d4)',
+          border: 'none', color: '#fff', borderRadius: 8, cursor: 'pointer',
+          fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+        }}>
+          <Plus size={14} /> 新しい日程調整を作成
+        </button>
       </div>
+      {editModal}
 
       {/* 調整中 */}
       {active.length > 0 ? (
@@ -2712,6 +2747,242 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses }) {
   );
 }
 
+// ============ 日程調整（作成/編集モーダル）============
+const POLL_DOW = ['日', '月', '火', '水', '木', '金', '土'];
+function dowOf(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? '' : POLL_DOW[d.getDay()];
+}
+
+function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
+  const isEdit = mode === 'edit';
+
+  const [title, setTitle] = useState(initial?.title || '');
+  const [planKey, setPlanKey] = useState(initial?.plan || ''); // '' = 未定
+  const [candidates, setCandidates] = useState(
+    initial?.candidateDates?.length
+      ? initial.candidateDates.map(cd => ({ date: cd.date, time: cd.time }))
+      : [{ date: '', time: '19:30-22:30' }]
+  );
+  const [targetMode, setTargetMode] = useState(initial?.invitedCustomerIds ? 'selected' : 'all');
+  const [invited, setInvited] = useState(new Set(initial?.invitedCustomerIds || []));
+  const [inviteSearch, setInviteSearch] = useState('');
+  const [deadline, setDeadline] = useState(initial?.deadline || '');
+  const [note, setNote] = useState(initial?.note || '');
+
+  const plan = planKey ? PLAN_DEFS[planKey] : null;
+  const brand = plan ? BRAND[plan.brand] : null;
+  const accent = brand ? brand.primary : '#6b5dc7';
+  // 確定済みポールは候補日の添字が sessions/通知と紐づくため、候補日を変更不可にする（confirmedIndex ズレ防止）
+  const lockedCandidates = isEdit && initial?.status === 'confirmed';
+
+  // 候補日の操作
+  const addCandidate = () => setCandidates(prev => [...prev, { date: '', time: '19:30-22:30' }]);
+  const removeCandidate = (idx) => setCandidates(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
+  const updateCandidate = (idx, patch) => setCandidates(prev => prev.map((c, i) => i === idx ? { ...c, ...patch } : c));
+
+  const toggleInvite = (id) => setInvited(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const filteredCustomers = CUSTOMERS.filter(c => !inviteSearch || c.name.includes(inviteSearch) || c.handle.includes(inviteSearch));
+
+  const validCandidates = candidates.filter(c => c.date);
+  const canSave = validCandidates.length >= 1 && (targetMode === 'all' || invited.size >= 1);
+
+  const handleSave = () => {
+    const candidateDates = validCandidates.map(c => ({ date: c.date, day: dowOf(c.date), time: c.time || '' }));
+    // タイトル未入力なら自動生成
+    const firstMonth = candidateDates[0] ? Number(candidateDates[0].date.slice(5, 7)) : null;
+    const autoTitle = `${brand ? brand.name + 'の' : ''}日程調整${firstMonth ? `（${firstMonth}月）` : ''}`;
+    const poll = {
+      id: isEdit ? initial.id : `poll${Date.now()}`,
+      title: title.trim() || autoTitle,
+      brand: plan ? plan.brand : null,
+      plan: planKey || null,
+      createdBy: isEdit ? initial.createdBy : '管理者',
+      createdAt: isEdit ? initial.createdAt : new Date().toISOString().slice(0, 16).replace('T', ' '),
+      candidateDates,
+      status: isEdit ? initial.status : 'open',
+      confirmedIndex: isEdit ? (initial.confirmedIndex ?? null) : null,
+      invitedCustomerIds: targetMode === 'selected' ? Array.from(invited) : null,
+      deadline: deadline || null,
+      note: note.trim() || '',
+    };
+    onSave(poll);
+  };
+
+  return (
+    <ModalShell onClose={onClose} maxWidth={640}>
+      <ModalHeader
+        title={isEdit ? '日程調整を編集' : '新しい日程調整'}
+        subtitle={isEdit ? '候補日や対象を変更できます' : '候補日を提示して参加可否を集めます'}
+        icon={<ListChecks size={16} />}
+        onClose={onClose}
+        accent={accent}
+      />
+
+      <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px' }}>
+        {/* タイトル */}
+        <Field label="タイトル（未入力なら自動生成）">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例: 6月 対面会の日程調整" style={inputStyle} />
+        </Field>
+
+        {/* 会のタイプ */}
+        <div style={{ marginBottom: 18 }}>
+          <FieldLabel>会のタイプ</FieldLabel>
+          <button onClick={() => setPlanKey('')} style={{
+            padding: '8px 14px', marginBottom: 8,
+            background: planKey === '' ? '#6b6e7a' : '#fff',
+            border: `1.5px solid ${planKey === '' ? '#6b6e7a' : '#e0ddd6'}`,
+            color: planKey === '' ? '#fff' : '#6b6e7a',
+            borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+          }}>未定のまま（あとで設定）</button>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {Object.entries(BRAND).map(([brandKey, b]) => {
+              const plansInBrand = Object.entries(PLAN_DEFS).filter(([, pd]) => pd.brand === brandKey);
+              return (
+                <div key={brandKey}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, marginTop: brandKey !== 'okiraku' ? 10 : 0 }}>
+                    {b.icon && <img src={b.icon} alt="" style={{ width: 18, height: 18 }} />}
+                    <span style={{ fontSize: 11, fontWeight: 700, color: b.primary }}>{b.name}</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 6 }}>
+                    {plansInBrand.map(([k, pd]) => (
+                      <button key={k} onClick={() => setPlanKey(k)} style={{
+                        padding: '9px 12px', textAlign: 'left',
+                        background: planKey === k ? b.primary : '#fff',
+                        border: `1.5px solid ${planKey === k ? b.primary : '#e0ddd6'}`,
+                        color: planKey === k ? '#fff' : '#2c3140',
+                        borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
+                        fontSize: 11, fontWeight: 600, transition: 'all 0.15s',
+                      }}>
+                        <div style={{ fontWeight: 700 }}>{pd.label}</div>
+                        <div style={{ fontSize: 9, marginTop: 2, opacity: 0.85 }}>
+                          {pd.price !== null ? fmtYen(pd.price) : '都度設定'} · {pd.capacity}名{pd.mode === 'offline' && ' · 対面'}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 候補日リスト */}
+        <div style={{ marginBottom: 18 }}>
+          <FieldLabel>候補日（最低1つ）</FieldLabel>
+          {lockedCandidates && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 12px', marginBottom: 10, background: '#e6f3eb', border: '1px solid #b8d9c4', borderRadius: 8, fontSize: 11, color: '#3a8c5b', fontWeight: 600 }}>
+              <Lock size={12} /> 確定済みのため候補日は変更できません
+            </div>
+          )}
+          <div style={{ display: 'grid', gap: 8 }}>
+            {candidates.map((c, idx) => (
+              <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input type="date" value={c.date} onChange={(e) => updateCandidate(idx, { date: e.target.value })} readOnly={lockedCandidates} style={{ ...inputStyle, flex: '1.3', ...(lockedCandidates && { background: '#fafaf6', color: '#9499a8' }) }} />
+                <span className="num" style={{ fontSize: 12, color: '#9499a8', width: 24, textAlign: 'center', flexShrink: 0 }}>{c.date ? `（${dowOf(c.date)}）` : ''}</span>
+                <input value={c.time} onChange={(e) => updateCandidate(idx, { time: e.target.value })} readOnly={lockedCandidates} placeholder="19:30-22:30" style={{ ...inputStyle, flex: '1', ...(lockedCandidates && { background: '#fafaf6', color: '#9499a8' }) }} />
+                <button onClick={() => removeCandidate(idx)} disabled={lockedCandidates || candidates.length <= 1} style={{
+                  flexShrink: 0, width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: '#fff', border: '1px solid #e0ddd6', borderRadius: 8,
+                  cursor: (lockedCandidates || candidates.length <= 1) ? 'not-allowed' : 'pointer',
+                  color: (lockedCandidates || candidates.length <= 1) ? '#d4d0c8' : '#d44a4a',
+                }} title="この候補日を削除"><X size={15} /></button>
+              </div>
+            ))}
+          </div>
+          {!lockedCandidates && (
+            <button onClick={addCandidate} style={{
+              marginTop: 8, display: 'flex', alignItems: 'center', gap: 5, padding: '8px 14px',
+              background: '#fff', border: '1px dashed #c9c4ba', color: '#6b6e7a',
+              borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+            }}><Plus size={13} /> 候補日を追加</button>
+          )}
+        </div>
+
+        {/* 依頼対象 */}
+        <div style={{ marginBottom: 18 }}>
+          <FieldLabel>依頼対象</FieldLabel>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            {[{ k: 'all', label: '全顧客' }, { k: 'selected', label: '選んだ人' }].map(opt => (
+              <button key={opt.k} onClick={() => setTargetMode(opt.k)} style={{
+                flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+                background: targetMode === opt.k ? accent : '#fff',
+                border: `1.5px solid ${targetMode === opt.k ? accent : '#e0ddd6'}`,
+                color: targetMode === opt.k ? '#fff' : '#6b6e7a',
+              }}>{opt.label}</button>
+            ))}
+          </div>
+          {targetMode === 'selected' && (
+            <div style={{ border: '1px solid #e8e5dd', borderRadius: 10, overflow: 'hidden' }}>
+              <div style={{ padding: '10px 12px', borderBottom: '1px solid #f0ede5', display: 'flex', gap: 10, alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: 1 }}>
+                  <Search size={13} color="#9499a8" style={{ position: 'absolute', left: 11, top: 9 }} />
+                  <input value={inviteSearch} onChange={(e) => setInviteSearch(e.target.value)} placeholder="顧客を検索" style={{ ...inputStyle, fontSize: 12, padding: '8px 12px 8px 32px' }} />
+                </div>
+                <span className="num" style={{ fontSize: 12, color: accent, fontWeight: 700, whiteSpace: 'nowrap' }}>{invited.size} 名選択中</span>
+              </div>
+              <div style={{ maxHeight: 220, overflow: 'auto' }}>
+                {filteredCustomers.map(c => {
+                  const checked = invited.has(c.id);
+                  return (
+                    <div key={c.id} onClick={() => toggleInvite(c.id)} style={{
+                      padding: '9px 12px', display: 'flex', alignItems: 'center', gap: 10,
+                      cursor: 'pointer', background: checked ? `${accent}12` : 'transparent', transition: 'background 0.15s',
+                    }}>
+                      <div style={{
+                        width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                        border: `2px solid ${checked ? accent : '#d4d0c8'}`, background: checked ? accent : '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>{checked && <Check size={12} color="#fff" strokeWidth={3} />}</div>
+                      <span style={{ width: 30, height: 30, borderRadius: '50%', flexShrink: 0, background: '#e0ddd6', color: '#6b6e7a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 }}>{c.avatar}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, color: '#2c3140', fontWeight: 600 }}>{c.name}</div>
+                        <div className="num" style={{ fontSize: 10, color: '#9499a8' }}>{c.handle} · {c.tier} · 参加{c.total}回</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 推奨期限 */}
+        <Field label="推奨期限（任意）">
+          <input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} style={inputStyle} />
+        </Field>
+
+        {/* メモ */}
+        <Field label="メモ（任意）">
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="例: 会場の都合で土日のみ。6人以上集まった日で開催します。" style={{ ...inputStyle, resize: 'vertical' }} />
+        </Field>
+      </div>
+
+      <div style={{ padding: 16, borderTop: '1px solid #f0ede5', display: 'flex', gap: 8 }}>
+        <button onClick={onClose} style={{
+          flex: 1, padding: 11, background: '#fff', border: '1px solid #d4d0c8',
+          color: '#2c3140', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+        }}>キャンセル</button>
+        <button onClick={handleSave} disabled={!canSave} style={{
+          flex: 2, padding: 11,
+          background: canSave ? `linear-gradient(135deg, ${accent}, ${brand ? brand.accent : '#3fb8d4'})` : '#e0ddd6',
+          border: 'none', color: '#fff', borderRadius: 8,
+          cursor: canSave ? 'pointer' : 'not-allowed',
+          fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+        }}>
+          <Check size={13} /> {isEdit ? '変更を保存' : 'この内容で作成'}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
 // ============ 日程調整（集計表）============
 // 回答区分のカラー（ROLE_STYLES と同系の落ち着いた配色を流用）
 const ANSWER_STYLE = {
@@ -2721,7 +2992,7 @@ const ANSWER_STYLE = {
   none:  { mark: '─', color: '#b0ada5', bg: '#f5f3ee', label: '未回答' },
 };
 
-function PollAggregateView({ poll, pollResponses, onBack }) {
+function PollAggregateView({ poll, pollResponses, onBack, onEdit }) {
   const toast = useToast();
   const brand = BRAND[poll.brand];
   const accent = brand ? brand.primary : '#2c3140';
@@ -2778,11 +3049,20 @@ function PollAggregateView({ poll, pollResponses, onBack }) {
             <h2 className="maru" style={{ fontSize: 18, fontWeight: 900, color: '#2c3140' }}>{poll.title}</h2>
             <div style={{ fontSize: 11, color: '#9499a8', fontWeight: 600 }}>{brand ? brand.name : ''} · {poll.createdBy}</div>
           </div>
-          {poll.invitedCustomerIds && (
-            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: BRAND.closed.primary, fontWeight: 700, background: BRAND.closed.softer, padding: '4px 10px', borderRadius: 999 }}>
-              <Lock size={10} /> 招待制
-            </span>
-          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            {poll.invitedCustomerIds && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: BRAND.closed.primary, fontWeight: 700, background: BRAND.closed.softer, padding: '4px 10px', borderRadius: 999 }}>
+                <Lock size={10} /> 招待制
+              </span>
+            )}
+            {onEdit && (
+              <button onClick={onEdit} style={{
+                display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px',
+                background: '#fff', border: `1.5px solid ${accent}`, color: accent,
+                borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+              }}>編集</button>
+            )}
+          </div>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, fontSize: 12, color: '#6b6e7a', fontWeight: 600 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><CalendarDays size={13} /> 候補 <span className="num" style={{ color: '#2c3140', fontWeight: 700 }}>{poll.candidateDates.length}</span> 日程</span>

@@ -6,7 +6,7 @@ import {
   AlertTriangle, Bell, Hash, MessageCircle, Link2, Zap, MapPin, Lock, UserCheck, Plus,
   List, LayoutGrid, CalendarDays, ListChecks,
 } from 'lucide-react';
-import { fetchSessions, subscribeSessions, saveSession, patchSession, removeSession, seedSessions } from './lib/firestore';
+import { subscribeSessions, saveSession, patchSession, removeSession, seedSessions } from './lib/firestore';
 // =====================================================================
 // ブランドアイコン（base64 PNG・お客さん提供）
 // 単一ファイル完結のため、外部importせずここに埋め込み
@@ -392,26 +392,28 @@ function AppInner() {
   const [announceHistory, setAnnounceHistory] = useState(ANNOUNCE_HISTORY_INIT); // 告知センターの配信履歴
   const [brandFilter, setBrandFilter] = useState('all');  // 参加者画面のブランドフィルタ（全画面背景にも反映）
 
-  // 起動時に Firestore から sessions を読み込む（ステップ2: 読み取り）
+  // Firestore の sessions をリアルタイム購読（ステップ3: 書き込み反映も自動）
   useEffect(() => {
-    let active = true;
-    fetchSessions()
-      .then(rows => { if (active) { setSessions(rows); setSessionsLoading(false); } })
-      .catch(() => { if (active) { setSessionsLoading(false); toast.push('会データの読み込みに失敗しました', 'error'); } });
-    return () => { active = false; };
+    const unsub = subscribeSessions(
+      rows => { setSessions(rows); setSessionsLoading(false); },
+      () => { setSessionsLoading(false); toast.push('会データの読み込みに失敗しました', 'error'); },
+    );
+    return () => unsub();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateParticipant = (id, patch) => {
     setParticipants(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
   };
+  // sessions のミューテータは Firestore へ書き込み、画面反映は onSnapshot に任せる（local setSessions しない）
   const updateSession = (id, patch) => {
-    setSessions(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
+    patchSession(id, patch).catch(() => toast.push('会の更新に失敗しました', 'error'));
   };
   const addSession = (newSession) => {
-    setSessions(prev => [...prev, newSession]);
+    saveSession(newSession).catch(() => toast.push('会の作成に失敗しました', 'error'));
   };
   const deleteSession = (id) => {
-    setSessions(prev => prev.filter(s => s.id !== id));
+    removeSession(id).catch(() => toast.push('会の削除に失敗しました', 'error'));
+    // participants は未移行のため、ローカル state からの紐づき削除のみ維持
     setParticipants(prev => prev.filter(p => p.sessionId !== id));
   };
   // 日程調整のミューテータ（フェーズ1で用意・後続フェーズのUIから利用）

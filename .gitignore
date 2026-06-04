@@ -18,6 +18,10 @@ dist-ssr
 .env.*.local
 !.env.example
 
+# Firebase（CLI キャッシュ・Functions の依存）
+.firebase/
+functions/node_modules
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

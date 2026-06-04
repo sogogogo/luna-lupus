@@ -4,7 +4,7 @@ import {
   TrendingUp, User, Phone, Mail, Search, X, ArrowLeft, QrCode, Wallet, Video, Star,
   Megaphone, Shuffle, Eye, EyeOff, Send, Copy, RotateCcw, XCircle, CheckCircle2,
   AlertTriangle, Bell, Hash, MessageCircle, Link2, Zap, MapPin, Lock, UserCheck, Plus,
-  List, LayoutGrid, CalendarDays,
+  List, LayoutGrid, CalendarDays, ListChecks,
 } from 'lucide-react';
 // =====================================================================
 // ブランドアイコン（base64 PNG・お客さん提供）
@@ -510,7 +510,7 @@ function AppInner() {
       <main>
         {view === 'customer'
           ? <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} setParticipants={setParticipants} brandFilter={brandFilter} setBrandFilter={setBrandFilter} />
-          : <AdminView sessions={sessions} participants={participants} setParticipants={setParticipants} updateSession={updateSession} setSessions={setSessions} addSession={addSession} deleteSession={deleteSession} />
+          : <AdminView sessions={sessions} participants={participants} setParticipants={setParticipants} updateSession={updateSession} setSessions={setSessions} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} />
         }
       </main>
     </div>
@@ -2510,7 +2510,7 @@ function Stat({ label, value, unit, small }) {
 // =====================================================================
 // 管理者側
 // =====================================================================
-function AdminView({ sessions, participants, setParticipants, updateSession, setSessions, addSession, deleteSession }) {
+function AdminView({ sessions, participants, setParticipants, updateSession, setSessions, addSession, deleteSession, schedulePolls, pollResponses }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
@@ -2524,6 +2524,7 @@ function AdminView({ sessions, participants, setParticipants, updateSession, set
       <div style={{ display: 'flex', gap: 2, marginBottom: 24, borderBottom: '1px solid #e8e5dd', overflowX: 'auto' }}>
         {[
           { id: 'dashboard', label: 'ダッシュボード', icon: TrendingUp },
+          { id: 'schedule', label: '日程調整', icon: ListChecks },
           { id: 'sessions', label: '会の管理', icon: Calendar },
           { id: 'payments', label: '参加者・支払い', icon: CreditCard },
           { id: 'roles', label: '役職割り振り', icon: Shuffle },
@@ -2545,6 +2546,7 @@ function AdminView({ sessions, participants, setParticipants, updateSession, set
       </div>
 
       {tab === 'dashboard' && <Dashboard sessions={sessions} participants={participants} />}
+      {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} />}
       {tab === 'sessions' && <SessionsAdmin sessions={sessions} participants={participants} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} />}
       {tab === 'payments' && <PaymentsAdmin sessions={sessions} participants={participants} updateParticipant={updateParticipant} />}
       {tab === 'roles' && (selectedSession
@@ -2554,6 +2556,153 @@ function AdminView({ sessions, participants, setParticipants, updateSession, set
       {tab === 'customers' && (selectedCustomer
         ? <CustomerDetail customer={selectedCustomer} onBack={() => setSelectedCustomer(null)} sessions={sessions} participants={participants} />
         : <CustomersAdmin onSelect={setSelectedCustomer} />)}
+    </div>
+  );
+}
+
+// ============ 日程調整（一覧）============
+const POLL_TODAY = '2026-05-03'; // デモ用の今日（カレンダー等と統一）
+
+// 回答進捗: 回答済み人数 / 対象人数（招待制は招待数、公開は全顧客数）
+function pollProgress(poll, pollResponses) {
+  const responded = pollResponses.filter(r => r.pollId === poll.id).length;
+  const target = poll.invitedCustomerIds ? poll.invitedCustomerIds.length : CUSTOMERS.length;
+  return { responded, target, ratio: target ? Math.min(1, responded / target) : 0 };
+}
+
+// 推奨期限までの残日数（負なら超過）
+function daysUntil(dateStr, fromStr = POLL_TODAY) {
+  if (!dateStr) return null;
+  const a = new Date(fromStr), b = new Date(dateStr);
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return null;
+  return Math.round((b - a) / 86400000);
+}
+
+function PollCard({ poll, pollResponses, onClick }) {
+  const brand = BRAND[poll.brand];
+  const { responded, target, ratio } = pollProgress(poll, pollResponses);
+  const left = daysUntil(poll.deadline);
+  const confirmed = poll.status === 'confirmed';
+  const confDate = confirmed && poll.confirmedIndex != null ? poll.candidateDates[poll.confirmedIndex] : null;
+
+  const deadlineLabel = left == null ? '—'
+    : left > 0 ? `推奨期限まで残${left}日`
+    : left === 0 ? '本日が推奨期限'
+    : `推奨期限を${Math.abs(left)}日超過`;
+
+  return (
+    <button onClick={onClick} style={{
+      textAlign: 'left', width: '100%', cursor: 'pointer',
+      background: '#fff', border: '1px solid #e8e5dd', borderRadius: 14,
+      padding: 18, fontFamily: 'inherit', display: 'block',
+      transition: 'box-shadow 0.2s, transform 0.2s',
+    }}
+      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.06)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)'; }}
+    >
+      {/* 上段: ブランドバッジ + タイトル + 状態 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <span style={{
+          width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+          background: brand ? `${brand.primary}1a` : '#eee',
+          color: brand ? brand.primary : '#6b6e7a',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 12, fontWeight: 900,
+        }} className="maru">{BRAND_INITIAL[poll.brand] || '？'}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="maru" style={{ fontSize: 14, fontWeight: 700, color: '#2c3140', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{poll.title}</div>
+          <div style={{ fontSize: 10, color: '#9499a8', fontWeight: 600 }}>{brand ? brand.name : ''} · {poll.createdBy}</div>
+        </div>
+        {poll.invitedCustomerIds && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: BRAND.closed.primary, fontWeight: 700, background: BRAND.closed.softer, padding: '3px 8px', borderRadius: 999 }}>
+            <Lock size={10} /> 招待制
+          </span>
+        )}
+      </div>
+
+      {/* 中段: 候補日数 + 回答進捗 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#6b6e7a', fontWeight: 600 }}>
+          <CalendarDays size={12} /> 候補 <span className="num" style={{ color: '#2c3140', fontWeight: 700 }}>{poll.candidateDates.length}</span> 日程
+        </span>
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#6b6e7a', fontWeight: 600 }}>
+          <Users size={12} /> 回答 <span className="num" style={{ color: '#2c3140', fontWeight: 700 }}>{responded}/{target}</span> 人
+        </span>
+      </div>
+      <div style={{ height: 7, borderRadius: 999, background: '#f0ede5', overflow: 'hidden', marginBottom: 12 }}>
+        <div style={{ height: '100%', width: `${Math.round(ratio * 100)}%`, background: confirmed ? '#4a9968' : (brand ? brand.primary : '#9499a8'), borderRadius: 999, transition: 'width 0.4s' }} />
+      </div>
+
+      {/* 下段: 状態 / 期限 or 確定日 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        {confirmed ? (
+          <span className="num" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#4a9968' }}>
+            <CheckCircle2 size={12} /> {confDate ? `${fmtMD(confDate.date, confDate.day)} で確定` : '確定済み'}
+          </span>
+        ) : poll.status === 'closed' ? (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#9499a8' }}>
+            <XCircle size={12} /> 締め切り済み
+          </span>
+        ) : (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: left != null && left <= 2 ? '#d97757' : '#6b6e7a' }}>
+            <Clock size={12} /> {deadlineLabel}
+          </span>
+        )}
+        <ChevronRight size={16} color="#cfcbc2" />
+      </div>
+    </button>
+  );
+}
+
+function SchedulePollsAdmin({ schedulePolls, pollResponses }) {
+  const toast = useToast();
+  const [showClosed, setShowClosed] = useState(false);
+
+  const active = schedulePolls.filter(p => p.status === 'open');
+  const closed = schedulePolls.filter(p => p.status !== 'open');
+
+  // フェーズ3で集計表画面に差し替え予定（今はダミーのトースト）
+  const handleSelect = (poll) => toast.push(`「${poll.title}」の集計表は次のフェーズで実装予定です`, 'info');
+
+  return (
+    <div style={{ animation: 'fadeUp 0.4s' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+        <h2 className="maru" style={{ fontSize: 18, fontWeight: 900, color: '#2c3140' }}>日程調整</h2>
+        <span style={{ fontSize: 11, color: '#9499a8', fontWeight: 600 }}>候補日を提示して参加可否を集める</span>
+      </div>
+
+      {/* 調整中 */}
+      {active.length > 0 ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14, marginBottom: 28 }}>
+          {active.map(poll => (
+            <PollCard key={poll.id} poll={poll} pollResponses={pollResponses} onClick={() => handleSelect(poll)} />
+          ))}
+        </div>
+      ) : (
+        <div style={{ padding: '40px 20px', textAlign: 'center', color: '#9499a8', fontSize: 12, background: '#fff', border: '1px dashed #e0ddd6', borderRadius: 14, marginBottom: 28 }}>
+          調整中の日程調整はありません
+        </div>
+      )}
+
+      {/* 確定済み・終了（折りたたみ） */}
+      {closed.length > 0 && (
+        <div>
+          <button onClick={() => setShowClosed(v => !v)} style={{
+            display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none',
+            cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, color: '#6b6e7a', padding: '6px 0',
+          }}>
+            <ChevronRight size={14} style={{ transform: showClosed ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
+            確定済み・終了した日程調整（{closed.length}）
+          </button>
+          {showClosed && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14, marginTop: 12, opacity: 0.85 }}>
+              {closed.map(poll => (
+                <PollCard key={poll.id} poll={poll} pollResponses={pollResponses} onClick={() => handleSelect(poll)} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

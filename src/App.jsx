@@ -12,6 +12,7 @@ import {
   subscribeParticipants, saveParticipant, patchParticipant, removeParticipant, seedParticipants,
   subscribeSchedulePolls, saveSchedulePoll, patchSchedulePoll, removeSchedulePoll, seedSchedulePolls,
   subscribePollResponses, savePollResponse, removePollResponse, seedPollResponses,
+  subscribeAnnouncements, addAnnouncement, seedAnnouncements,
 } from './lib/firestore';
 // =====================================================================
 // ブランドアイコン（base64 PNG・お客さん提供）
@@ -417,7 +418,7 @@ function AppInner() {
   const [participants, setParticipants] = useState([]);      // Firestore から読み込む（DB移行: participants）
   const [schedulePolls, setSchedulePolls] = useState([]);    // Firestore から読み込む（DB移行: schedulePolls）
   const [pollResponses, setPollResponses] = useState([]);    // Firestore から読み込む（DB移行: pollResponses）
-  const [announceHistory, setAnnounceHistory] = useState(ANNOUNCE_HISTORY_INIT); // 告知センターの配信履歴
+  const [announceHistory, setAnnounceHistory] = useState([]); // Firestore から読み込む（DB移行: announcements）
   const [brandFilter, setBrandFilter] = useState('all');  // 参加者画面のブランドフィルタ（全画面背景にも反映）
 
   // Firestore の各コレクションをリアルタイム購読（書き込み反映も自動）
@@ -438,7 +439,11 @@ function AppInner() {
       rows => setPollResponses(rows),
       () => toast.push('日程調整の回答データの読み込みに失敗しました', 'error'),
     );
-    return () => { unsubS(); unsubP(); unsubPoll(); unsubRes(); };
+    const unsubAnn = subscribeAnnouncements(
+      rows => setAnnounceHistory(rows),
+      () => toast.push('告知履歴の読み込みに失敗しました', 'error'),
+    );
+    return () => { unsubS(); unsubP(); unsubPoll(); unsubRes(); unsubAnn(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // participants のミューテータは Firestore へ書き込み、画面反映は onSnapshot に任せる
@@ -478,7 +483,7 @@ function AppInner() {
   const upsertPollResponse = (response) => {
     savePollResponse(response).catch(() => toast.push('回答の送信に失敗しました', 'error'));
   };
-  const addAnnounce = (entry) => setAnnounceHistory(prev => [entry, ...prev]);
+  const addAnnounce = (entry) => addAnnouncement(entry).catch(() => toast.push('告知履歴の記録に失敗しました', 'error'));
 
   // ブランドに応じたページ全体の背景
   const pageBg = useMemo(() => {
@@ -3823,6 +3828,7 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
                   seedParticipants(PARTICIPANTS_INIT),
                   seedSchedulePolls(SCHEDULE_POLLS_INIT),
                   seedPollResponses(POLL_RESPONSES_INIT),
+                  seedAnnouncements(ANNOUNCE_HISTORY_INIT),
                 ]);
                 toast.push('サンプルデータを Firestore に投入しました', 'success');
               } catch { toast.push('投入に失敗しました（Firestoreルール/接続を確認）', 'error'); }

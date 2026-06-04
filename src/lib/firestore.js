@@ -10,7 +10,7 @@
 import { db } from './firebase';
 import {
   collection, getDocs, onSnapshot,
-  doc, setDoc, updateDoc, deleteDoc,
+  doc, addDoc, setDoc, updateDoc, deleteDoc,
 } from 'firebase/firestore';
 
 const SESSIONS = 'sessions';
@@ -163,5 +163,33 @@ export function removePollResponse(id) {
 export async function seedPollResponses(responsesArr) {
   await Promise.all(
     responsesArr.map((r) => setDoc(doc(db, POLL_RESPONSES_COL, String(r.id)), clean(r))),
+  );
+}
+
+// =====================================================================
+// announcements コレクション（告知配信履歴）
+// エントリに id を持たないため、追加は addDoc（自動ID）。読み取りは date 降順でソート。
+// シードは決定的ID（seed-N）で setDoc し、再投入しても重複しないようにする。
+// =====================================================================
+const ANNOUNCEMENTS_COL = 'announcements';
+
+export function subscribeAnnouncements(onChange, onError) {
+  return onSnapshot(
+    collection(db, ANNOUNCEMENTS_COL),
+    (snap) => {
+      const rows = snap.docs.map((d) => d.data());
+      // date は 'YYYY-MM-DD HH:MM' 文字列。新しい順に並べる
+      rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+      onChange(rows);
+    },
+    onError,
+  );
+}
+export function addAnnouncement(entry) {
+  return addDoc(collection(db, ANNOUNCEMENTS_COL), clean(entry));
+}
+export async function seedAnnouncements(entriesArr) {
+  await Promise.all(
+    entriesArr.map((e, i) => setDoc(doc(db, ANNOUNCEMENTS_COL, `seed-${i}`), clean(e))),
   );
 }

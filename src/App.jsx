@@ -6,7 +6,10 @@ import {
   AlertTriangle, Bell, Hash, MessageCircle, Link2, Zap, MapPin, Lock, UserCheck, Plus,
   List, LayoutGrid, CalendarDays, ListChecks,
 } from 'lucide-react';
-import { subscribeSessions, saveSession, patchSession, removeSession, seedSessions } from './lib/firestore';
+import {
+  subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
+  subscribeCustomers, seedCustomers,
+} from './lib/firestore';
 // =====================================================================
 // ブランドアイコン（base64 PNG・お客さん提供）
 // 単一ファイル完結のため、外部importせずここに埋め込み
@@ -371,12 +374,34 @@ function ToastProvider({ children }) {
 }
 
 // =====================================================================
+// 顧客データ（Firestore）— ToastProvider と同じ Context 流儀で全画面に供給
+// CUSTOMERS は読み取り専用のため state ではなく Context で配る（prop-drilling 回避）
+// =====================================================================
+const CustomersContext = createContext([]);
+const useCustomers = () => useContext(CustomersContext);
+
+function CustomersProvider({ children }) {
+  const [customers, setCustomers] = useState([]);
+  const toast = useToast();
+  useEffect(() => {
+    const unsub = subscribeCustomers(
+      rows => setCustomers(rows),
+      () => toast.push('顧客データの読み込みに失敗しました', 'error'),
+    );
+    return () => unsub();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  return <CustomersContext.Provider value={customers}>{children}</CustomersContext.Provider>;
+}
+
+// =====================================================================
 // ルート
 // =====================================================================
 export default function App() {
   return (
     <ToastProvider>
-      <AppInner />
+      <CustomersProvider>
+        <AppInner />
+      </CustomersProvider>
     </ToastProvider>
   );
 }
@@ -1035,9 +1060,10 @@ function CustomerPollList({ polls, pollResponses, myId, onBack, onSelect }) {
 // ============ 参加者：日程調整 回答画面 ============
 function CustomerPollAnswer({ poll, pollResponses, myId, onBack, onSubmit }) {
   const toast = useToast();
+  const customers = useCustomers();
   const brand = poll.brand ? BRAND[poll.brand] : null;
   const accent = brand ? brand.primary : '#6b5dc7';
-  const me = CUSTOMERS.find(c => c.id === myId);
+  const me = customers.find(c => c.id === myId);
   const existing = (pollResponses || []).find(r => r.pollId === poll.id && r.customerId === myId);
   const isPublic = !poll.invitedCustomerIds; // 公開ポールのみ他の人の回答を表示
 
@@ -2681,7 +2707,14 @@ function BookingDone({ session, onHome }) {
 
 // ============ マイページ ============
 function MyPage({ onBack, sessions, participants, myId }) {
-  const me = CUSTOMERS.find(c => c.id === myId);
+  const customers = useCustomers();
+  const me = customers.find(c => c.id === myId);
+  if (!me) return (
+    <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
+      <BackButton onClick={onBack} label="ホームに戻る" />
+      <div style={{ marginTop: 20 }}><EmptyCard text="顧客データを読み込み中…" /></div>
+    </div>
+  );
   const enrich = (p) => ({ ...p, session: enrichSessionById(sessions, p.sessionId) });
   const myUpcoming = participants.filter(p => p.customerId === myId && !p.cancelled).map(enrich).filter(x => x.session?.status === 'open');
   const myHistory = participants.filter(p => p.customerId === myId).map(enrich).filter(x => x.session?.status === 'closed');
@@ -2858,9 +2891,9 @@ function AdminView({ sessions, participants, setParticipants, updateSession, set
 const POLL_TODAY = '2026-05-03'; // デモ用の今日（カレンダー等と統一）
 
 // 回答進捗: 回答済み人数 / 対象人数（招待制は招待数、公開は全顧客数）
-function pollProgress(poll, pollResponses) {
+function pollProgress(poll, pollResponses, totalCustomers) {
   const responded = pollResponses.filter(r => r.pollId === poll.id).length;
-  const target = poll.invitedCustomerIds ? poll.invitedCustomerIds.length : CUSTOMERS.length;
+  const target = poll.invitedCustomerIds ? poll.invitedCustomerIds.length : totalCustomers;
   return { responded, target, ratio: target ? Math.min(1, responded / target) : 0 };
 }
 
@@ -2873,8 +2906,9 @@ function daysUntil(dateStr, fromStr = POLL_TODAY) {
 }
 
 function PollCard({ poll, pollResponses, onClick }) {
+  const customers = useCustomers();
   const brand = BRAND[poll.brand];
-  const { responded, target, ratio } = pollProgress(poll, pollResponses);
+  const { responded, target, ratio } = pollProgress(poll, pollResponses, customers.length);
   const left = daysUntil(poll.deadline);
   const confirmed = poll.status === 'confirmed';
   const confDate = confirmed && poll.confirmedIndex != null ? poll.candidateDates[poll.confirmedIndex] : null;
@@ -3107,6 +3141,7 @@ function dowOf(dateStr) {
 
 function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
   const isEdit = mode === 'edit';
+  const customers = useCustomers();
 
   const [title, setTitle] = useState(initial?.title || '');
   const [planKey, setPlanKey] = useState(initial?.plan || ''); // '' = 未定
@@ -3137,7 +3172,7 @@ function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
     next.has(id) ? next.delete(id) : next.add(id);
     return next;
   });
-  const filteredCustomers = CUSTOMERS.filter(c => !inviteSearch || c.name.includes(inviteSearch) || c.handle.includes(inviteSearch));
+  const filteredCustomers = customers.filter(c => !inviteSearch || c.name.includes(inviteSearch) || c.handle.includes(inviteSearch));
 
   const validCandidates = candidates.filter(c => c.date);
   const canSave = validCandidates.length >= 1 && (targetMode === 'all' || invited.size >= 1);
@@ -3343,6 +3378,7 @@ const ANSWER_STYLE = {
 };
 
 function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm }) {
+  const customers = useCustomers();
   const [confirmingIndex, setConfirmingIndex] = useState(null);
   const brand = BRAND[poll.brand];
   const accent = brand ? brand.primary : '#2c3140';
@@ -3350,8 +3386,8 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm }) {
 
   // 対象顧客（公開=全顧客 / 招待制=招待された顧客）
   const targets = poll.invitedCustomerIds
-    ? CUSTOMERS.filter(c => poll.invitedCustomerIds.includes(c.id))
-    : CUSTOMERS;
+    ? customers.filter(c => poll.invitedCustomerIds.includes(c.id))
+    : customers;
 
   // customerId -> 回答
   const resByCustomer = {};
@@ -3763,16 +3799,21 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {/* 開発用：サンプル会データを Firestore に投入（本番ビルドでは非表示・冪等） */}
+          {/* 開発用：サンプルデータを Firestore に投入（本番ビルドでは非表示・冪等） */}
           {import.meta.env.DEV && (
             <button onClick={async () => {
-              try { await seedSessions(SESSIONS_INIT); toast.push('サンプルの会データを Firestore に投入しました', 'success'); }
-              catch { toast.push('投入に失敗しました（Firestoreルール/接続を確認）', 'error'); }
+              try {
+                await Promise.all([
+                  seedSessions(SESSIONS_INIT),
+                  seedCustomers(CUSTOMERS),
+                ]);
+                toast.push('サンプルデータ（会・顧客）を Firestore に投入しました', 'success');
+              } catch { toast.push('投入に失敗しました（Firestoreルール/接続を確認）', 'error'); }
             }} style={{
               padding: '10px 14px', background: '#fff', border: '1px dashed #c9962a', color: '#c9962a',
               borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
               display: 'inline-flex', alignItems: 'center', gap: 6,
-            }} title="開発用：SESSIONS_INIT を Firestore に投入">
+            }} title="開発用：サンプルデータを Firestore に投入">
               <RotateCcw size={12} /> サンプル投入(DEV)
             </button>
           )}
@@ -4110,11 +4151,12 @@ function FieldLabel({ children }) {
 
 // ============ クローズド会の招待設定モーダル ============
 function ClosedInviteModal({ session, updateSession, onClose }) {
+  const customers = useCustomers();
   const [invited, setInvited] = useState(new Set(session.invitedCustomerIds || []));
   const [search, setSearch] = useState('');
   const toast = useToast();
 
-  const filteredCustomers = CUSTOMERS.filter(c =>
+  const filteredCustomers = customers.filter(c =>
     !search || c.name.includes(search) || c.handle.includes(search)
   );
 
@@ -4691,6 +4733,7 @@ function RoleAssignment({ session, participants, updateParticipant, onBack, setP
 
 // ============ 告知センター ============
 function AnnouncementCenter({ sessions, participants, history, addHistory }) {
+  const customers = useCustomers();
   const upcoming = sessions.filter(s => s.status === 'open');
   const [target, setTarget] = useState(upcoming[0]?.id);
   const targetRaw = sessions.find(s => s.id === target);
@@ -4794,7 +4837,7 @@ function AnnouncementCenter({ sessions, participants, history, addHistory }) {
           onSend={(payload) => {
             const channelLabel = broadcastChannel === 'app' ? 'アプリ内' : broadcastChannel === 'line' ? 'LINE一斉' : '自動リマインド';
             const targetLabel = broadcastChannel === 'app' ? '全ユーザー' : `${targetSession.title} 予約者`;
-            const recipientCount = broadcastChannel === 'app' ? CUSTOMERS.length : targetCount;
+            const recipientCount = broadcastChannel === 'app' ? customers.length : targetCount;
             addHistory({
               date: nowISO(), channel: channelLabel, target: targetLabel,
               subject: payload.subject, count: recipientCount,
@@ -4861,6 +4904,7 @@ function ChannelCard({ icon, color, title, audience, cta, hint, copyText, onActi
 
 // ============ 一斉送信モーダル ============
 function BroadcastModal({ channel, session, targetCount, defaultBody, defaultSubject, onSend, onClose }) {
+  const customers = useCustomers();
   const [subject, setSubject] = useState(defaultSubject);
   const [body, setBody] = useState(defaultBody);
   const [scheduleType, setScheduleType] = useState('now'); // 'now' | 'later'
@@ -4868,7 +4912,7 @@ function BroadcastModal({ channel, session, targetCount, defaultBody, defaultSub
   const [scheduleTime, setScheduleTime] = useState('18:00');
 
   const cfg = {
-    app: { color: '#5b9bd5', label: 'アプリ内お知らせ', icon: <Bell size={16} />, audience: '全ユーザー（参加者画面トップ＆お知らせ欄）', count: CUSTOMERS.length },
+    app: { color: '#5b9bd5', label: 'アプリ内お知らせ', icon: <Bell size={16} />, audience: '全ユーザー（参加者画面トップ＆お知らせ欄）', count: customers.length },
     line: { color: '#3a8dc4', label: 'LINE / メール一斉配信', icon: <MessageCircle size={16} />, audience: `${session.title} の予約者`, count: targetCount },
     remind: { color: '#e8645f', label: 'リマインド送信', icon: <Zap size={16} />, audience: '予約者全員', count: targetCount },
   }[channel];
@@ -5083,13 +5127,14 @@ ${fmtYen(s.price)}（PayPayにて）
 
 // ============ 顧客管理 ============
 function CustomersAdmin({ onSelect }) {
+  const customers = useCustomers();
   const [q, setQ] = useState('');
   const [tier, setTier] = useState('all');
 
-  const list = useMemo(() => CUSTOMERS.filter(c =>
+  const list = useMemo(() => customers.filter(c =>
     (tier === 'all' || c.tier === tier) &&
     (q === '' || c.name.includes(q) || c.handle.includes(q))
-  ), [q, tier]);
+  ), [q, tier, customers]);
 
   return (
     <div className="fadeup">

@@ -60,3 +60,30 @@ export async function seedSessions(sessionsArr) {
     sessionsArr.map((s) => setDoc(doc(db, SESSIONS, String(s.id)), clean(s))),
   );
 }
+
+// =====================================================================
+// customers コレクション（読み取り専用UIだが、書き込みヘルパーも将来用に用意）
+// =====================================================================
+const CUSTOMERS_COL = 'customers';
+
+export function subscribeCustomers(onChange, onError) {
+  return onSnapshot(
+    collection(db, CUSTOMERS_COL),
+    (snap) => onChange(snap.docs.map((d) => d.data())),
+    onError,
+  );
+}
+export function saveCustomer(customer) {
+  return setDoc(doc(db, CUSTOMERS_COL, String(customer.id)), clean(customer));
+}
+export function patchCustomer(id, patch) {
+  return updateDoc(doc(db, CUSTOMERS_COL, String(id)), clean(patch));
+}
+export function removeCustomer(id) {
+  return deleteDoc(doc(db, CUSTOMERS_COL, String(id)));
+}
+export async function seedCustomers(customersArr) {
+  await Promise.all(
+    customersArr.map((c) => setDoc(doc(db, CUSTOMERS_COL, String(c.id)), clean(c))),
+  );
+}

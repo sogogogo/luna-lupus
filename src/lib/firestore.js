@@ -114,3 +114,54 @@ export async function seedParticipants(participantsArr) {
     participantsArr.map((p) => setDoc(doc(db, PARTICIPANTS_COL, String(p.id)), clean(p))),
   );
 }
+
+// =====================================================================
+// schedulePolls コレクション（日程調整）。id は 'poll1' 等の文字列
+// =====================================================================
+const SCHEDULE_POLLS_COL = 'schedulePolls';
+
+export function subscribeSchedulePolls(onChange, onError) {
+  return onSnapshot(
+    collection(db, SCHEDULE_POLLS_COL),
+    (snap) => onChange(snap.docs.map((d) => d.data())),
+    onError,
+  );
+}
+export function saveSchedulePoll(poll) {
+  return setDoc(doc(db, SCHEDULE_POLLS_COL, String(poll.id)), clean(poll));
+}
+export function patchSchedulePoll(id, patch) {
+  return updateDoc(doc(db, SCHEDULE_POLLS_COL, String(id)), clean(patch));
+}
+export function removeSchedulePoll(id) {
+  return deleteDoc(doc(db, SCHEDULE_POLLS_COL, String(id)));
+}
+export async function seedSchedulePolls(pollsArr) {
+  await Promise.all(
+    pollsArr.map((p) => setDoc(doc(db, SCHEDULE_POLLS_COL, String(p.id)), clean(p))),
+  );
+}
+
+// =====================================================================
+// pollResponses コレクション（日程調整の回答）。id は 'res1' 等の文字列
+// =====================================================================
+const POLL_RESPONSES_COL = 'pollResponses';
+
+export function subscribePollResponses(onChange, onError) {
+  return onSnapshot(
+    collection(db, POLL_RESPONSES_COL),
+    (snap) => onChange(snap.docs.map((d) => d.data())),
+    onError,
+  );
+}
+export function savePollResponse(response) {
+  return setDoc(doc(db, POLL_RESPONSES_COL, String(response.id)), clean(response));
+}
+export function removePollResponse(id) {
+  return deleteDoc(doc(db, POLL_RESPONSES_COL, String(id)));
+}
+export async function seedPollResponses(responsesArr) {
+  await Promise.all(
+    responsesArr.map((r) => setDoc(doc(db, POLL_RESPONSES_COL, String(r.id)), clean(r))),
+  );
+}

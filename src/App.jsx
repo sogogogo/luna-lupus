@@ -10,6 +10,8 @@ import {
   subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
   subscribeCustomers, seedCustomers,
   subscribeParticipants, saveParticipant, patchParticipant, removeParticipant, seedParticipants,
+  subscribeSchedulePolls, saveSchedulePoll, patchSchedulePoll, removeSchedulePoll, seedSchedulePolls,
+  subscribePollResponses, savePollResponse, removePollResponse, seedPollResponses,
 } from './lib/firestore';
 // =====================================================================
 // ブランドアイコン（base64 PNG・お客さん提供）
@@ -413,12 +415,12 @@ function AppInner() {
   const [sessions, setSessions] = useState([]);              // Firestore から読み込む（DB移行: sessions）
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [participants, setParticipants] = useState([]);      // Firestore から読み込む（DB移行: participants）
-  const [schedulePolls, setSchedulePolls] = useState(SCHEDULE_POLLS_INIT);   // 日程調整（フェーズ1: データモデル）
-  const [pollResponses, setPollResponses] = useState(POLL_RESPONSES_INIT);   // 日程調整への回答
+  const [schedulePolls, setSchedulePolls] = useState([]);    // Firestore から読み込む（DB移行: schedulePolls）
+  const [pollResponses, setPollResponses] = useState([]);    // Firestore から読み込む（DB移行: pollResponses）
   const [announceHistory, setAnnounceHistory] = useState(ANNOUNCE_HISTORY_INIT); // 告知センターの配信履歴
   const [brandFilter, setBrandFilter] = useState('all');  // 参加者画面のブランドフィルタ（全画面背景にも反映）
 
-  // Firestore の sessions / participants をリアルタイム購読（書き込み反映も自動）
+  // Firestore の各コレクションをリアルタイム購読（書き込み反映も自動）
   useEffect(() => {
     const unsubS = subscribeSessions(
       rows => { setSessions(rows); setSessionsLoading(false); },
@@ -428,7 +430,15 @@ function AppInner() {
       rows => setParticipants(rows),
       () => toast.push('参加者データの読み込みに失敗しました', 'error'),
     );
-    return () => { unsubS(); unsubP(); };
+    const unsubPoll = subscribeSchedulePolls(
+      rows => setSchedulePolls(rows),
+      () => toast.push('日程調整データの読み込みに失敗しました', 'error'),
+    );
+    const unsubRes = subscribePollResponses(
+      rows => setPollResponses(rows),
+      () => toast.push('日程調整の回答データの読み込みに失敗しました', 'error'),
+    );
+    return () => { unsubS(); unsubP(); unsubPoll(); unsubRes(); };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // participants のミューテータは Firestore へ書き込み、画面反映は onSnapshot に任せる
@@ -452,24 +462,21 @@ function AppInner() {
       removeParticipant(p.id).catch(() => {}),
     );
   };
-  // 日程調整のミューテータ（フェーズ1で用意・後続フェーズのUIから利用）
+  // 日程調整のミューテータ（Firestore へ書き込み・反映は onSnapshot）
   const addSchedulePoll = (newPoll) => {
-    setSchedulePolls(prev => [...prev, newPoll]);
+    saveSchedulePoll(newPoll).catch(() => toast.push('日程調整の作成に失敗しました', 'error'));
   };
   const updateSchedulePoll = (id, patch) => {
-    setSchedulePolls(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
+    patchSchedulePoll(id, patch).catch(() => toast.push('日程調整の更新に失敗しました', 'error'));
   };
   const deleteSchedulePoll = (id) => {
-    setSchedulePolls(prev => prev.filter(p => p.id !== id));
-    setPollResponses(prev => prev.filter(r => r.pollId !== id));
+    removeSchedulePoll(id).catch(() => toast.push('日程調整の削除に失敗しました', 'error'));
+    // 紐づく回答も Firestore から削除
+    pollResponses.filter(r => r.pollId === id).forEach(r => removePollResponse(r.id).catch(() => {}));
   };
+  // response.id は CustomerPollAnswer 側で既存回答の id を再利用するため、setDoc（id指定）で作成も更新も兼ねる
   const upsertPollResponse = (response) => {
-    setPollResponses(prev => {
-      const exists = prev.some(r => r.pollId === response.pollId && r.customerId === response.customerId);
-      return exists
-        ? prev.map(r => (r.pollId === response.pollId && r.customerId === response.customerId) ? { ...r, ...response } : r)
-        : [...prev, response];
-    });
+    savePollResponse(response).catch(() => toast.push('回答の送信に失敗しました', 'error'));
   };
   const addAnnounce = (entry) => setAnnounceHistory(prev => [entry, ...prev]);
 
@@ -3814,8 +3821,10 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
                   seedSessions(SESSIONS_INIT),
                   seedCustomers(CUSTOMERS),
                   seedParticipants(PARTICIPANTS_INIT),
+                  seedSchedulePolls(SCHEDULE_POLLS_INIT),
+                  seedPollResponses(POLL_RESPONSES_INIT),
                 ]);
-                toast.push('サンプルデータ（会・顧客・参加者）を Firestore に投入しました', 'success');
+                toast.push('サンプルデータを Firestore に投入しました', 'success');
               } catch { toast.push('投入に失敗しました（Firestoreルール/接続を確認）', 'error'); }
             }} style={{
               padding: '10px 14px', background: '#fff', border: '1px dashed #c9962a', color: '#c9962a',

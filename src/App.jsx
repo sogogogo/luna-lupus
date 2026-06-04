@@ -181,6 +181,85 @@ const ROLES_BY_PLAYERS = {
   14: ['人狼', '人狼', '人狼', '占い師', '霊媒師', '騎士', '共有者', '共有者', '村人', '村人', '村人', '村人', '村人', '狂人'],
 };
 
+// =====================================================================
+// 日程調整（調整さん機能）データモデル — フェーズ1
+// =====================================================================
+// schedulePolls: 運営が候補日を複数提示して参加可否を募る「日程調整」本体
+//   - brand は BRAND のキー / plan は PLAN_DEFS のキー（想定プラン・任意）
+//   - candidateDates: 候補日時の配列。pollResponses.answers のキーはこの配列の添字(0,1,2...)に対応
+//   - status: 'open'（回答受付中）/ 'closed'（締切）/ 'confirmed'（開催日確定）
+//   - confirmedIndex: 確定した candidateDates の添字（未確定は null）
+//   - invitedCustomerIds: 招待制なら customerId 配列 / null = 公開
+const SCHEDULE_POLLS_INIT = [
+  {
+    id: 'poll1',
+    title: '6月 対面会の日程調整',
+    brand: 'taimen',
+    plan: 'taimen_akiba',
+    createdBy: '黒猫GM',
+    createdAt: '2026-05-28 21:00',
+    candidateDates: [
+      { date: '2026-06-13', day: '土', time: '14:00-17:30' },
+      { date: '2026-06-14', day: '日', time: '14:00-17:30' },
+      { date: '2026-06-20', day: '土', time: '14:00-17:30' },
+    ],
+    status: 'open',
+    confirmedIndex: null,
+    invitedCustomerIds: null,
+    deadline: '2026-06-06',
+    note: '会場（アキバ人狼館）の都合で土日のみ。第一希望日に集まりやすい日で確定します。',
+  },
+  {
+    id: 'poll2',
+    title: 'お気楽14人村 平日夜 やるならいつ？',
+    brand: 'okiraku',
+    plan: 'okiraku_zoom_14',
+    createdBy: '夜霧GM',
+    createdAt: '2026-05-30 12:00',
+    candidateDates: [
+      { date: '2026-06-10', day: '水', time: '19:30-22:30' },
+      { date: '2026-06-12', day: '金', time: '19:30-22:30' },
+    ],
+    status: 'open',
+    confirmedIndex: null,
+    invitedCustomerIds: null,
+    deadline: '2026-06-08',
+    note: '6人以上集まった日で開催します。',
+  },
+  {
+    id: 'poll3',
+    title: 'VIP限定クローズド会の日程調整',
+    brand: 'closed',
+    plan: 'closed_custom',
+    createdBy: '黒猫GM',
+    createdAt: '2026-05-26 19:30',
+    candidateDates: [
+      { date: '2026-06-21', day: '日', time: '20:00-22:30' },
+      { date: '2026-06-28', day: '日', time: '20:00-22:30' },
+    ],
+    status: 'confirmed',
+    confirmedIndex: 0,
+    invitedCustomerIds: [1, 4, 5, 7],
+    deadline: '2026-06-15',
+    note: '招待者のみ。6/21（日）で確定しました。',
+  },
+];
+
+// pollResponses: 各参加者の回答。answers のキーは対応する poll の candidateDates の添字(0,1,2...)、
+//   値は 'yes'（◯参加可）/ 'maybe'（△調整可）/ 'no'（×不可）
+const POLL_RESPONSES_INIT = [
+  // poll1（6月 対面会）
+  { id: 'res1', pollId: 'poll1', customerId: 1, name: '佐藤 健',     handle: '@takeru_jinrou', answers: { 0: 'yes',   1: 'maybe', 2: 'no'    }, comment: '13日が第一希望です', respondedAt: '2026-05-29 09:12' },
+  { id: 'res2', pollId: 'poll1', customerId: 4, name: '高橋 由美',   handle: '@yumi_taka',     answers: { 0: 'yes',   1: 'yes',   2: 'maybe' }, comment: '',                   respondedAt: '2026-05-29 13:40' },
+  { id: 'res3', pollId: 'poll1', customerId: 7, name: '山本 龍之介', handle: '@ryu_yama',      answers: { 0: 'no',    1: 'yes',   2: 'yes'   }, comment: '13日は仕事です',     respondedAt: '2026-05-30 21:05' },
+  // poll2（お気楽14人村）
+  { id: 'res4', pollId: 'poll2', customerId: 2, name: '鈴木 美咲',   handle: '@misaki_wolf',   answers: { 0: 'maybe', 1: 'yes'              }, comment: '金曜なら確実です',   respondedAt: '2026-05-31 08:20' },
+  { id: 'res5', pollId: 'poll2', customerId: 5, name: '伊藤 大輔',   handle: '@daisuke_i',     answers: { 0: 'yes',   1: 'yes'              }, comment: '',                   respondedAt: '2026-05-31 18:55' },
+  // poll3（クローズド・確定済み）
+  { id: 'res6', pollId: 'poll3', customerId: 1, name: '佐藤 健',     handle: '@takeru_jinrou', answers: { 0: 'yes',   1: 'maybe'            }, comment: '',                   respondedAt: '2026-05-27 10:00' },
+  { id: 'res7', pollId: 'poll3', customerId: 4, name: '高橋 由美',   handle: '@yumi_taka',     answers: { 0: 'yes',   1: 'yes'              }, comment: 'どちらも参加できます', respondedAt: '2026-05-27 12:30' },
+];
+
 const ROLE_STYLES = {
   '人狼':   { color: '#d44a4a', bg: '#fde8e8', team: '人狼陣営' },
   '占い師': { color: '#3a8dc4', bg: '#e6f1f9', team: '村人陣営' },
@@ -298,6 +377,8 @@ function AppInner() {
   const [view, setView] = useState('customer');
   const [sessions, setSessions] = useState(SESSIONS_INIT);
   const [participants, setParticipants] = useState(PARTICIPANTS_INIT);
+  const [schedulePolls, setSchedulePolls] = useState(SCHEDULE_POLLS_INIT);   // 日程調整（フェーズ1: データモデル）
+  const [pollResponses, setPollResponses] = useState(POLL_RESPONSES_INIT);   // 日程調整への回答
   const [brandFilter, setBrandFilter] = useState('all');  // 参加者画面のブランドフィルタ（全画面背景にも反映）
 
   const updateParticipant = (id, patch) => {
@@ -312,6 +393,25 @@ function AppInner() {
   const deleteSession = (id) => {
     setSessions(prev => prev.filter(s => s.id !== id));
     setParticipants(prev => prev.filter(p => p.sessionId !== id));
+  };
+  // 日程調整のミューテータ（フェーズ1で用意・後続フェーズのUIから利用）
+  const addSchedulePoll = (newPoll) => {
+    setSchedulePolls(prev => [...prev, newPoll]);
+  };
+  const updateSchedulePoll = (id, patch) => {
+    setSchedulePolls(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
+  };
+  const deleteSchedulePoll = (id) => {
+    setSchedulePolls(prev => prev.filter(p => p.id !== id));
+    setPollResponses(prev => prev.filter(r => r.pollId !== id));
+  };
+  const upsertPollResponse = (response) => {
+    setPollResponses(prev => {
+      const exists = prev.some(r => r.pollId === response.pollId && r.customerId === response.customerId);
+      return exists
+        ? prev.map(r => (r.pollId === response.pollId && r.customerId === response.customerId) ? { ...r, ...response } : r)
+        : [...prev, response];
+    });
   };
 
   // ブランドに応じたページ全体の背景

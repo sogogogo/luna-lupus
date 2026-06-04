@@ -1,9 +1,10 @@
 import React, { useState, useMemo, createContext, useContext, useEffect, useRef } from 'react';
 import {
-  Calendar, Users, CreditCard, ChevronRight, Check, Clock, Sparkles, AlertCircle,
+  Calendar, Users, CreditCard, ChevronRight, ChevronLeft, Check, Clock, Sparkles, AlertCircle,
   TrendingUp, User, Phone, Mail, Search, X, ArrowLeft, QrCode, Wallet, Video, Star,
   Megaphone, Shuffle, Eye, EyeOff, Send, Copy, RotateCcw, XCircle, CheckCircle2,
   AlertTriangle, Bell, Hash, MessageCircle, Link2, Zap, MapPin, Lock, UserCheck, Plus,
+  List, LayoutGrid, CalendarDays,
 } from 'lucide-react';
 // =====================================================================
 // ブランドアイコン（base64 PNG・お客さん提供）
@@ -38,6 +39,17 @@ const BRAND = {
     softer: '#f6f4fb',
     gradient: 'linear-gradient(135deg, #ece9f7 0%, #e0f2f7 100%)',
   },
+  taimen: {
+    key: 'taimen',
+    name: '対面人狼会',
+    catch: '顔を合わせて、生の駆け引き。',
+    icon: ICON_OKIRAKU,           // お気楽の狼アイコンを流用（同系列のため）
+    primary: '#5e5a6a',            // スモークグレー
+    accent: '#c54a4a',             // 赤
+    soft: '#ebe9ee',
+    softer: '#f4f2f6',
+    gradient: 'linear-gradient(135deg, #ebe9ee 0%, #f5e3e3 100%)',
+  },
   event: {
     key: 'event',
     name: 'イベント会',
@@ -68,11 +80,10 @@ const PLAN_DEFS = {
   'okiraku_zoom_10': { brand: 'okiraku', mode: 'online', label: '10人村（人狼デビュー歓迎）', price: 2000, capacity: 10 },
   'okiraku_zoom_14': { brand: 'okiraku', mode: 'online', label: '14人村（練習会）',           price: 2000, capacity: 14 },
   'okiraku_guest':   { brand: 'okiraku', mode: 'online', label: 'ゲスト会',                   price: 5000, capacity: 12 },
-  // お気楽人狼会・対面
-  'okiraku_akiba':   { brand: 'okiraku', mode: 'offline', venue: 'アキバ人狼館',     label: 'アキバ人狼館',     price: 2500, capacity: 12 },
-  'okiraku_suriaro': { brand: 'okiraku', mode: 'offline', venue: 'スリアロβスタジオ', label: 'スリアロβスタジオ', price: 2500, capacity: 12 },
+  // 対面人狼会
+  'taimen_akiba':    { brand: 'taimen', mode: 'offline', venue: 'アキバ人狼館',     label: 'アキバ人狼館',     price: 2500, capacity: 12 },
+  'taimen_suriaro':  { brand: 'taimen', mode: 'offline', venue: 'スリアロβスタジオ', label: 'スリアロβスタジオ', price: 2500, capacity: 12 },
   // ステップアップ人狼会・Zoom
-  'stepup_iwatsuki': { brand: 'stepup', mode: 'online', label: '単独ゲスト（いわつきクローズ）', price: 3000, capacity: 12 },
   'stepup_solo':     { brand: 'stepup', mode: 'online', label: '単独ゲスト（基本）',             price: 4000, capacity: 12 },
   'stepup_solo_pro': { brand: 'stepup', mode: 'online', label: '単独ゲスト（ギャラ高い人）',     price: 4500, capacity: 12 },
   'stepup_double':   { brand: 'stepup', mode: 'online', label: 'Wゲスト（基本）',                price: 4000, capacity: 12 },
@@ -93,11 +104,11 @@ const SESSIONS_INIT = [
   { id: 4, date: '2026-05-10', day: '日', time: '13:00-17:00', plan: 'okiraku_guest',   gm: '夜霧GM',     platform: 'Zoom',        meetingUrl: 'https://zoom.us/j/4729183746', guestName: '狼月 シン', guestBio: 'お気楽ゲスト回・初心者にも優しく解説', status: 'open' },
   // 5月 中旬
   { id: 5, date: '2026-05-15', day: '金', time: '19:30-22:30', plan: 'okiraku_zoom_10', gm: '月影GM',     platform: 'Zoom',        meetingUrl: 'https://zoom.us/j/5938201746', guestName: null, status: 'open' },
-  { id: 6, date: '2026-05-16', day: '土', time: '14:00-17:30', plan: 'okiraku_akiba',   gm: '黒猫GM',     platform: '対面',         meetingUrl: null,                            guestName: null, status: 'open' },
+  { id: 6, date: '2026-05-16', day: '土', time: '14:00-17:30', plan: 'taimen_akiba',   gm: '黒猫GM',     platform: '対面',         meetingUrl: null,                            guestName: null, status: 'open' },
   { id: 7, date: '2026-05-16', day: '土', time: '19:00-22:30', plan: 'stepup_double',   gm: '黒猫GM',     platform: 'Zoom',        meetingUrl: 'https://zoom.us/j/6184729301', guestName: '霧島 アヤメ ＆ 狼月 シン', guestBio: 'Wゲスト・心理戦の名手2人が同卓', status: 'open' },
   // 5月 下旬
-  { id: 8, date: '2026-05-22', day: '金', time: '19:30-22:30', plan: 'stepup_iwatsuki', gm: 'いわつきGM', platform: 'Zoom',        meetingUrl: 'https://zoom.us/j/2837461928', guestName: 'いわつきGM', guestBio: 'いわつきクローズ・常連向け上級回', status: 'open' },
-  { id: 9, date: '2026-05-23', day: '土', time: '14:00-17:30', plan: 'okiraku_suriaro', gm: '夜霧GM',     platform: '対面',         meetingUrl: null,                            guestName: null, status: 'open' },
+  { id: 8, date: '2026-05-22', day: '金', time: '19:30-22:30', plan: 'closed_custom',   gm: 'いわつきGM', platform: 'Zoom',        meetingUrl: 'https://zoom.us/j/2837461928', guestName: 'いわつきGM', guestBio: 'いわつきクローズ・常連向け上級回', customTitle: 'いわつきクローズ', customPrice: 3000, invitedCustomerIds: [1, 4, 7], status: 'open' },
+  { id: 9, date: '2026-05-23', day: '土', time: '14:00-17:30', plan: 'taimen_suriaro', gm: '夜霧GM',     platform: '対面',         meetingUrl: null,                            guestName: null, status: 'open' },
   { id: 10, date: '2026-05-24', day: '日', time: '13:00-17:00', plan: 'stepup_solo_pro', gm: '黒猫GM',    platform: 'Zoom',        meetingUrl: 'https://zoom.us/j/3847261059', guestName: '紫月 リン', guestBio: '元プロ人狼プレイヤー・全国大会優勝経験者', status: 'open' },
   // イベント・クローズド
   { id: 11, date: '2026-05-29', day: '金', time: '20:00-23:30', plan: 'event_custom',   gm: '夜霧GM',     platform: 'Zoom',        meetingUrl: 'https://zoom.us/j/1827364509', guestName: null, customTitle: '5周年記念オールナイト', customPrice: 6000, status: 'open' },
@@ -308,6 +319,7 @@ function AppInner() {
     if (view === 'admin' || brandFilter === 'all') return '#fbfaf7';
     if (brandFilter === 'okiraku') return BRAND.okiraku.softer; // ほのかな水色
     if (brandFilter === 'stepup') return BRAND.stepup.softer;   // ほのかな紫
+    if (brandFilter === 'taimen') return BRAND.taimen.softer;   // ほのかなグレー
     return '#fbfaf7';
   }, [view, brandFilter]);
 
@@ -367,7 +379,7 @@ function AppInner() {
           </div>
           <div>
             <div className="maru" style={{ fontSize: 17, fontWeight: 700, color: '#2c3140', lineHeight: 1.1 }}>
-              人狼ハウス管理
+              N主宰人狼会
             </div>
             <div className="num" style={{ fontSize: 10, color: '#7a7d8c', marginTop: 2, letterSpacing: '0.1em' }}>
               JINROU · BOOKING · MANAGER
@@ -417,6 +429,10 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
 
   // ====== 検索・絞り込み state ======
   const [searchOpen, setSearchOpen] = useState(false);
+  const [viewMode, setViewMode] = useState('list');       // 'list' | 'calendar'
+  const [yearMonth, setYearMonth] = useState('2026-05');
+  const [popupDate, setPopupDate] = useState(null);
+  const [popupSessions, setPopupSessions] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [priceRange, setPriceRange] = useState('all'); // 'all' | 'low' | 'mid' | 'high' | 'top' | 'custom'
   const [priceMin, setPriceMin] = useState('');
@@ -507,6 +523,7 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
     all: visibleSessions.length,
     okiraku: visibleSessions.filter(s => s.brand.key === 'okiraku').length,
     stepup: visibleSessions.filter(s => s.brand.key === 'stepup').length,
+    taimen: visibleSessions.filter(s => s.brand.key === 'taimen').length,
   };
 
   if (step === 'mypage')   return <MyPage onBack={() => setStep('list')} sessions={sessions} participants={participants} myId={ME_ID} />;
@@ -526,14 +543,14 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
               welcome to —
             </div>
             <h1 className="maru" style={{
-              fontSize: 38, lineHeight: 1.2, margin: 0, fontWeight: 900,
+              fontSize: 36, lineHeight: 1.3, margin: 0, fontWeight: 900,
               color: '#2c3140',
             }}>
-              今夜の人狼を、<br />
-              <span style={{ color: heroBrand.primary, transition: 'color 0.4s' }}>ここから</span>。
+              ウソをつくゲームで<br />
+              <span style={{ color: heroBrand.primary, transition: 'color 0.4s' }}>ホントの友達</span>が出来る。
             </h1>
             <p style={{ fontSize: 14, color: '#6b6e7a', marginTop: 14, lineHeight: 1.9, maxWidth: 480 }}>
-              {filter === 'all' ? <>会の予約から詳細の確認、お支払いまで。<br />このページひとつで、すべて完結します。</>
+              {filter === 'all' ? <>初心者から上級者まで、誰でも楽しめる人狼会を毎週開催中。<br />お気に入りの会を見つけて、新しい仲間に出会いましょう。</>
                 : <>{heroBrand.catch}<br />開催中の{heroBrand.name}を一覧でご覧いただけます。</>}
             </p>
           </div>
@@ -569,7 +586,7 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
       })()}
 
       {/* 2大ブランド・タブ式フィルタ */}
-      <section style={{ marginBottom: 20 }}>
+      <section style={{ marginBottom: 24 }}>
         <BrandTabs filter={filter} setFilter={setFilter} counts={brandCounts} />
       </section>
 
@@ -655,18 +672,63 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
             </span>
           )}
         </h2>
-        {activeFilterCount > 0 && (
-          <button onClick={resetSearch} style={{
-            padding: '6px 12px', background: 'transparent', border: '1px solid #d4d0c8',
-            color: '#6b6e7a', borderRadius: 999, cursor: 'pointer',
-            fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
-            display: 'inline-flex', alignItems: 'center', gap: 5,
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {activeFilterCount > 0 && (
+            <button onClick={resetSearch} style={{
+              padding: '6px 12px', background: 'transparent', border: '1px solid #d4d0c8',
+              color: '#6b6e7a', borderRadius: 999, cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 11, fontWeight: 600,
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+            }}>
+              <RotateCcw size={11} /> 絞り込みを解除
+            </button>
+          )}
+          {/* リスト/カレンダー切替 */}
+          <div style={{
+            display: 'flex', background: '#f0eee8',
+            borderRadius: 8, padding: 3,
           }}>
-            <RotateCcw size={11} /> 絞り込みを解除
-          </button>
-        )}
+            <button onClick={() => setViewMode('list')} style={{
+              padding: '7px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+              background: viewMode === 'list' ? '#2c3140' : 'transparent',
+              color: viewMode === 'list' ? '#fff' : '#6b6e7a',
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              transition: 'all 0.15s',
+            }}><List size={12} /> 一覧</button>
+            <button onClick={() => setViewMode('calendar')} style={{
+              padding: '7px 12px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+              background: viewMode === 'calendar' ? '#2c3140' : 'transparent',
+              color: viewMode === 'calendar' ? '#fff' : '#6b6e7a',
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              transition: 'all 0.15s',
+            }}><LayoutGrid size={12} /> カレンダー</button>
+          </div>
+        </div>
       </div>
 
+      {viewMode === 'calendar' ? (
+        <MonthCalendar
+          yearMonth={yearMonth}
+          setYearMonth={setYearMonth}
+          sessions={sessions.filter(raw => {
+            // 参加者画面では：自分が見える会 + フィルタ・検索を反映
+            const enriched = enrichSession(raw);
+            if (raw.status !== 'open') return false;
+            if (enriched.isClosed && !(raw.invitedCustomerIds || []).includes(ME_ID)) return false;
+            if (filter !== 'all' && enriched.brand.key !== filter) return false;
+            if (!matchesQuery(enriched)) return false;
+            if (!matchesPrice(enriched.price)) return false;
+            if (!matchesDate(enriched.date)) return false;
+            return true;
+          })}
+          participants={participants}
+          mode="customer"
+          onDayClick={(date, daySessions) => { setPopupDate(date); setPopupSessions(daySessions); }}
+        />
+      ) : (
+      <>
       {/* セッション一覧 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
         {filtered.map((s, i) => (
@@ -702,6 +764,19 @@ function CustomerView({ sessions, participants, updateParticipant, setParticipan
             </>
           ) : '開催予定はまだありません'}
         </div>
+      )}
+      </>
+      )}
+
+      {popupDate && (
+        <DaySessionsPopup
+          date={popupDate}
+          sessions={popupSessions}
+          participants={participants}
+          accent={filter === 'all' ? '#2c3140' : BRAND[filter].primary}
+          onClose={() => setPopupDate(null)}
+          onSelect={(s) => { setSelected(s); setStep('detail'); }}
+        />
       )}
 
       {announceOpen && <AnnouncementModal onClose={() => setAnnounceOpen(false)} />}
@@ -752,6 +827,354 @@ function BackButton({ onClick, label = '一覧へ戻る', accent = '#2c3140' }) 
       <ArrowLeft size={16} strokeWidth={2.5} />
       {label}
     </button>
+  );
+}
+
+// ============ 月間カレンダー（参加者・管理者共用） ============
+
+// ブランドの頭文字（カレンダーマス内表示用）
+const BRAND_INITIAL = {
+  okiraku: 'オ',
+  stepup: 'ス',
+  taimen: '対',
+  event: 'イ',
+  closed: 'ク',
+};
+
+// "2026-05" 形式から、その月のカレンダー描画用の42マス（6週間 x 7日）を作成
+// 月曜始まり（月火水木金土日）
+function buildCalendarGrid(yearMonth, todayStr) {
+  const [year, month] = yearMonth.split('-').map(Number);
+  const firstDay = new Date(year, month - 1, 1);
+  // 月曜=0 になるように補正：JS getDay は日=0,月=1,...,土=6 → 月=0,火=1,...,日=6
+  const jsDay = firstDay.getDay();
+  const mondayBasedDay = (jsDay + 6) % 7;
+  const dayLabels = ['日', '月', '火', '水', '木', '金', '土'];
+  const cells = [];
+  // カレンダーの最初のマス：その月の1日が含まれる週の月曜日
+  const startDate = new Date(year, month - 1, 1 - mondayBasedDay);
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + i);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+    cells.push({
+      date: dateStr,
+      day: dayLabels[d.getDay()],
+      isCurrentMonth: d.getMonth() === month - 1,
+      isToday: dateStr === todayStr,
+      dayOfWeek: d.getDay(),  // 0=日, 6=土（色分け用）
+    });
+  }
+  return cells;
+}
+
+// 月送り
+function addMonth(yearMonth, delta) {
+  const [year, month] = yearMonth.split('-').map(Number);
+  const d = new Date(year, month - 1 + delta, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function MonthCalendar({ yearMonth, setYearMonth, sessions, participants, onDayClick, mode = 'admin' }) {
+  // mode: 'admin' = 全件 / 'customer' = 招待されたクローズドのみ表示+人数非表示も可
+  const todayStr = '2026-05-03'; // デモ用の今日
+  const cells = buildCalendarGrid(yearMonth, todayStr);
+
+  // 各日付に紐づく会
+  const sessionsByDate = useMemo(() => {
+    const map = {};
+    sessions.forEach(raw => {
+      if (raw.status !== 'open') return;
+      const s = enrichSession(raw);
+      if (!map[s.date]) map[s.date] = [];
+      map[s.date].push(s);
+    });
+    return map;
+  }, [sessions]);
+
+  // ブランド頭文字+人数のサマリ
+// セッション1件 → カレンダーマスのラベル文字列（接尾辞）
+// 例：'×10'（10人村）/ '×14'（14人村）/ '×単(狼月)' / '×W(狼月)' / '×アキバ' / '×ゲ(狼月)'
+function getCalendarLabel(s) {
+  const planKey = typeof s.plan === 'object' ? null : s.plan;
+  const actualPlanKey = planKey || (s.plan && s.plan.label ? Object.keys(PLAN_DEFS).find(k => PLAN_DEFS[k].label === s.plan.label) : null);
+
+  // ゲスト名の短縮（最初の2文字 or 1単語）
+  const guestShort = (g) => {
+    if (!g) return '';
+    // 「狼月 シン」→「狼月」、「霧島 アヤメ ＆ 狼月 シン」→「霧島＆狼月」
+    if (g.includes('＆')) {
+      const parts = g.split('＆').map(p => p.trim().split(/\s+/)[0]);
+      return parts.join('＆');
+    }
+    return g.split(/\s+/)[0];
+  };
+
+  switch (actualPlanKey) {
+    case 'okiraku_zoom_10':  return '×10';
+    case 'okiraku_zoom_14':  return '×14';
+    case 'okiraku_guest':    return s.guestName ? `×ゲ(${guestShort(s.guestName)})` : '×ゲスト';
+    case 'taimen_akiba':     return '×アキバ';
+    case 'taimen_suriaro':   return '×スリアロ';
+    case 'stepup_solo':      return s.guestName ? `×単(${guestShort(s.guestName)})` : '×単';
+    case 'stepup_solo_pro':  return s.guestName ? `×単(${guestShort(s.guestName)})` : '×単';
+    case 'stepup_double':    return s.guestName ? `×W(${guestShort(s.guestName)})` : '×W';
+    case 'event_custom':     return s.customTitle ? `×${s.customTitle.slice(0, 6)}` : '×イベント';
+    case 'closed_custom':    return s.customTitle ? `×${s.customTitle.slice(0, 6)}` : '×クローズド';
+    default:                 return '';
+  }
+}
+
+  const [year, month] = yearMonth.split('-').map(Number);
+
+  return (
+    <div className="fadeup" style={{
+      background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12,
+      overflow: 'hidden',
+    }}>
+      {/* 月送りヘッダー */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px 18px', borderBottom: '1px solid #f0ede5',
+        background: '#fafaf6',
+      }}>
+        <button onClick={() => setYearMonth(addMonth(yearMonth, -1))} style={{
+          padding: '7px 12px', background: '#fff', border: '1px solid #d4d0c8',
+          color: '#2c3140', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+          fontSize: 11, fontWeight: 600,
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+        }}>
+          <ChevronLeft size={13} /> 前月
+        </button>
+        <h3 className="maru" style={{ margin: 0, fontSize: 18, fontWeight: 900, color: '#2c3140' }}>
+          {year}年<span className="num" style={{ marginLeft: 6 }}>{month}</span>月
+        </h3>
+        <button onClick={() => setYearMonth(addMonth(yearMonth, 1))} style={{
+          padding: '7px 12px', background: '#fff', border: '1px solid #d4d0c8',
+          color: '#2c3140', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+          fontSize: 11, fontWeight: 600,
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+        }}>
+          翌月 <ChevronRight size={13} />
+        </button>
+      </div>
+
+      {/* 曜日ヘッダー（月曜始まり） */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)',
+        background: '#fafaf6', borderBottom: '1px solid #f0ede5',
+      }}>
+        {[
+          { d: '月', color: '#6b6e7a' },
+          { d: '火', color: '#6b6e7a' },
+          { d: '水', color: '#6b6e7a' },
+          { d: '木', color: '#6b6e7a' },
+          { d: '金', color: '#6b6e7a' },
+          { d: '土', color: '#3a8dc4' },
+          { d: '日', color: '#d44a4a' },
+        ].map(({ d, color }) => (
+          <div key={d} style={{
+            padding: '10px 4px', textAlign: 'center',
+            fontSize: 11, fontWeight: 700, letterSpacing: '0.1em',
+            color,
+          }}>{d}</div>
+        ))}
+      </div>
+
+      {/* 日付セル（6週間x7日 = 42マス） */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+        {cells.map((cell, i) => {
+          const daySessions = sessionsByDate[cell.date] || [];
+          const hasEvents = daySessions.length > 0;
+          // 週末の薄色背景
+          const weekendBg = cell.dayOfWeek === 0 ? '#fef5f5' : cell.dayOfWeek === 6 ? '#f5f9fd' : null;
+          const baseBg = cell.isToday
+            ? '#fffbe8'
+            : cell.isCurrentMonth
+              ? (weekendBg || '#fff')
+              : '#fafaf6';
+          return (
+            <div
+              key={i}
+              onClick={() => hasEvents && onDayClick(cell.date, daySessions)}
+              style={{
+                minHeight: 110, padding: '8px 7px 10px',
+                borderRight: (i + 1) % 7 !== 0 ? '1px solid #f5f3ed' : 'none',
+                borderBottom: i < 35 ? '1px solid #f5f3ed' : 'none',
+                background: baseBg,
+                cursor: hasEvents ? 'pointer' : 'default',
+                transition: 'all 0.18s',
+                opacity: cell.isCurrentMonth ? 1 : 0.45,
+                position: 'relative',
+              }}
+              onMouseEnter={(e) => {
+                if (hasEvents) {
+                  e.currentTarget.style.background = cell.isToday ? '#fff5d4' : '#eef5fc';
+                  e.currentTarget.style.boxShadow = 'inset 0 0 0 2px rgba(91,155,213,0.3)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = baseBg;
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              {/* 日付 */}
+              <div style={{
+                display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                marginBottom: 6,
+              }}>
+                <span className="num" style={{
+                  fontSize: cell.isToday ? 16 : 13,
+                  fontWeight: cell.isToday ? 700 : 600,
+                  color: cell.isToday ? '#c9962a' :
+                         cell.dayOfWeek === 0 ? '#d44a4a' :
+                         cell.dayOfWeek === 6 ? '#3a8dc4' : '#2c3140',
+                  lineHeight: 1,
+                }}>{Number(cell.date.slice(8, 10))}</span>
+                {cell.isToday && (
+                  <span style={{
+                    fontSize: 8, fontWeight: 700, padding: '2px 6px',
+                    background: '#f5c542', color: '#2c3140', borderRadius: 4,
+                    letterSpacing: '0.05em',
+                  }}>今日</span>
+                )}
+              </div>
+
+              {/* 会のリスト（1セッション=1ラベル） */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {daySessions.slice(0, 3).map((s, idx) => {
+                  const initial = BRAND_INITIAL[s.brand.key] || '?';
+                  const label = getCalendarLabel(s);
+                  const isOffline = s.isOffline;
+                  return (
+                    <div key={s.id} style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 3,
+                      padding: '3px 6px',
+                      background: `${s.brand.primary}1a`,
+                      border: `1px solid ${s.brand.primary}33`,
+                      borderRadius: 4,
+                      fontSize: 10, fontWeight: 700,
+                      color: s.brand.primary,
+                      overflow: 'hidden',
+                      whiteSpace: 'nowrap',
+                      textOverflow: 'ellipsis',
+                      lineHeight: 1.4,
+                    }}>
+                      {isOffline && (
+                        <MapPin size={9} style={{ flexShrink: 0, opacity: 0.85 }} />
+                      )}
+                      <span style={{ fontWeight: 900, flexShrink: 0 }}>{initial}</span>
+                      <span className="num" style={{
+                        fontSize: 9, fontWeight: 600,
+                        overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>{label}</span>
+                    </div>
+                  );
+                })}
+                {daySessions.length > 3 && (
+                  <div style={{ fontSize: 9, color: '#9499a8', padding: '0 5px', fontWeight: 600 }}>
+                    +{daySessions.length - 3} 件
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 凡例 */}
+      <div style={{
+        padding: '12px 18px', borderTop: '1px solid #f0ede5',
+        background: '#fafaf6',
+        display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+        fontSize: 10, color: '#6b6e7a',
+      }}>
+        <span style={{ fontWeight: 700, letterSpacing: '0.1em' }}>凡例：</span>
+        {Object.entries(BRAND).filter(([k]) => k !== 'closed' || mode === 'admin').map(([k, b]) => (
+          <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{
+              padding: '2px 7px',
+              background: `${b.primary}1a`,
+              border: `1px solid ${b.primary}33`,
+              color: b.primary,
+              borderRadius: 4, fontWeight: 900, fontSize: 10,
+            }}>{BRAND_INITIAL[k]}</span>
+            {b.name}
+          </span>
+        ))}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 6 }}>
+          <MapPin size={10} color="#6b6e7a" /> 対面開催
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ============ 日別の会一覧ポップアップ ============
+function DaySessionsPopup({ date, sessions, participants, onClose, onSelect, accent = '#2c3140' }) {
+  // dateから曜日を出す
+  const d = new Date(date);
+  const dayLabels = ['日', '月', '火', '水', '木', '金', '土'];
+  const day = dayLabels[d.getDay()];
+
+  return (
+    <ModalShell onClose={onClose} maxWidth={520}>
+      <ModalHeader
+        title={`${fmtMD(date, day)} の開催`}
+        subtitle={`${sessions.length} 件の会があります`}
+        icon={<CalendarDays size={16} />}
+        accent={accent}
+        onClose={onClose}
+      />
+      <div style={{ flex: 1, overflow: 'auto', padding: '12px 0' }}>
+        {sessions.map((s, i) => {
+          const cnt = participants.filter(p => p.sessionId === s.id && !p.cancelled).length;
+          const remaining = s.capacity - cnt;
+          return (
+            <div
+              key={s.id}
+              onClick={() => { onSelect(s); onClose(); }}
+              style={{
+                padding: '14px 24px', cursor: 'pointer',
+                borderBottom: i < sessions.length - 1 ? '1px solid #f5f3ed' : 'none',
+                borderLeft: `3px solid ${s.brand.primary}`,
+                transition: 'background 0.15s',
+                display: 'flex', alignItems: 'center', gap: 12,
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#fafaf6'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            >
+              {s.brand.icon && (
+                <img src={s.brand.icon} alt="" style={{ width: 36, height: 36, objectFit: 'contain', flexShrink: 0 }} />
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 10, color: s.brand.primary, fontWeight: 700, marginBottom: 2 }}>
+                  {s.brand.name}
+                </div>
+                <div className="maru" style={{ fontSize: 14, fontWeight: 700, color: '#2c3140', marginBottom: 4 }}>
+                  {s.title}
+                </div>
+                <div className="num" style={{ fontSize: 11, color: '#6b6e7a' }}>
+                  {s.time} · {s.gm}{s.guestName && ` × ${s.guestName}`}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div className="num" style={{ fontSize: 14, fontWeight: 700, color: s.brand.primary }}>
+                  {fmtYen(s.price)}
+                </div>
+                <div className="num" style={{ fontSize: 10, color: remaining <= 3 ? '#e8645f' : '#9499a8', marginTop: 2, fontWeight: 600 }}>
+                  残 {remaining}/{s.capacity}
+                </div>
+              </div>
+              <ChevronRight size={16} color="#9499a8" />
+            </div>
+          );
+        })}
+      </div>
+    </ModalShell>
   );
 }
 
@@ -819,16 +1242,17 @@ function ConfirmModal({ icon, title, body, confirmLabel, confirmColor = '#2c3140
 // ============ ブランドタブ（参加者画面のメインフィルタ） ============
 function BrandTabs({ filter, setFilter, counts }) {
   const tabs = [
-    { id: 'all', label: 'すべての会', sub: 'all events', icon: null, primary: '#2c3140', accent: '#7a7d8c', gradient: 'linear-gradient(135deg, #f5f3ed 0%, #fafaf6 100%)' },
+    { id: 'all', label: 'すべての会', sub: 'all events', icon: null, useFallbackIcon: 'sparkles', primary: '#2c3140', accent: '#7a7d8c', gradient: 'linear-gradient(135deg, #f5f3ed 0%, #fafaf6 100%)' },
     { id: 'okiraku', label: BRAND.okiraku.name, sub: 'kigaru', icon: BRAND.okiraku.icon, primary: BRAND.okiraku.primary, accent: BRAND.okiraku.accent, gradient: BRAND.okiraku.gradient },
     { id: 'stepup', label: BRAND.stepup.name, sub: 'step up', icon: BRAND.stepup.icon, primary: BRAND.stepup.primary, accent: BRAND.stepup.accent, gradient: BRAND.stepup.gradient },
+    { id: 'taimen', label: BRAND.taimen.name, sub: 'in person', icon: null, useFallbackIcon: 'map', primary: BRAND.taimen.primary, accent: BRAND.taimen.accent, gradient: BRAND.taimen.gradient },
   ];
   return (
     <div>
       <div className="hand" style={{ fontSize: 17, color: '#6b6e7a', marginBottom: 8, marginLeft: 4 }}>
         ブランドで絞り込む ↓
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
         {tabs.map(t => {
           const active = filter === t.id;
           return (
@@ -836,7 +1260,7 @@ function BrandTabs({ filter, setFilter, counts }) {
               position: 'relative', padding: 0,
               background: active ? t.gradient : '#fff',
               border: `2.5px solid ${active ? t.primary : '#e8e5dd'}`,
-              borderRadius: 16, cursor: 'pointer',
+              borderRadius: 14, cursor: 'pointer',
               fontFamily: 'inherit', textAlign: 'left',
               overflow: 'hidden',
               transition: 'all 0.2s',
@@ -862,34 +1286,36 @@ function BrandTabs({ filter, setFilter, counts }) {
               {active && (
                 <div style={{ height: 4, background: `linear-gradient(90deg, ${t.primary}, ${t.accent})` }} />
               )}
-              <div style={{ padding: '18px 18px 16px', display: 'flex', alignItems: 'center', gap: 12, position: 'relative' }}>
+              <div style={{ padding: '14px 14px 12px', display: 'flex', alignItems: 'center', gap: 10, position: 'relative' }}>
                 {t.icon ? (
-                  <img src={t.icon} alt="" className={active ? 'float' : ''} style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+                  <img src={t.icon} alt="" className={active ? 'float' : ''} style={{ width: 40, height: 40, objectFit: 'contain', flexShrink: 0 }} />
                 ) : (
                   <div style={{
-                    width: 48, height: 48, flexShrink: 0,
+                    width: 40, height: 40, flexShrink: 0,
                     borderRadius: '50%',
                     background: active ? '#fff' : '#f0ede5',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     color: active ? t.primary : '#9499a8',
                   }}>
-                    <Sparkles size={20} strokeWidth={2.2} />
+                    {t.useFallbackIcon === 'map'
+                      ? <MapPin size={18} strokeWidth={2.2} />
+                      : <Sparkles size={18} strokeWidth={2.2} />}
                   </div>
                 )}
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 9, color: t.primary, letterSpacing: '0.18em', fontWeight: 700, marginBottom: 3, opacity: active ? 1 : 0.7 }}>
+                  <div style={{ fontSize: 8, color: t.primary, letterSpacing: '0.18em', fontWeight: 700, marginBottom: 3, opacity: active ? 1 : 0.7 }}>
                     {t.sub.toUpperCase()}
                   </div>
                   <div className="maru" style={{
-                    fontSize: 14, fontWeight: 900,
-                    color: active ? '#2c3140' : '#2c3140',
-                    lineHeight: 1.25, marginBottom: 6,
+                    fontSize: 13, fontWeight: 900,
+                    color: '#2c3140',
+                    lineHeight: 1.25, marginBottom: 5,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   }}>
                     {t.label}
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                    <span className="num" style={{ fontSize: 22, fontWeight: 700, color: t.primary, lineHeight: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
+                    <span className="num" style={{ fontSize: 20, fontWeight: 700, color: t.primary, lineHeight: 1 }}>
                       {counts[t.id]}
                     </span>
                     <span style={{ fontSize: 10, color: '#6b6e7a' }}>件</span>
@@ -897,12 +1323,12 @@ function BrandTabs({ filter, setFilter, counts }) {
                 </div>
                 {active && (
                   <div style={{
-                    position: 'absolute', top: 10, right: 10,
-                    width: 18, height: 18, borderRadius: '50%',
+                    position: 'absolute', top: 8, right: 8,
+                    width: 16, height: 16, borderRadius: '50%',
                     background: t.primary,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                   }}>
-                    <Check size={11} color="#fff" strokeWidth={3} />
+                    <Check size={10} color="#fff" strokeWidth={3} />
                   </div>
                 )}
               </div>
@@ -2147,12 +2573,40 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
   const [creating, setCreating] = useState(false);        // 新規作成モーダル
   const [editingSession, setEditingSession] = useState(null); // 通常編集モーダル
   const [deletingId, setDeletingId] = useState(null);
+  const [viewMode, setViewMode] = useState('list');       // 'list' | 'calendar'
+  const [yearMonth, setYearMonth] = useState('2026-05');
+  const [popupDate, setPopupDate] = useState(null);
+  const [popupSessions, setPopupSessions] = useState([]);
   const toast = useToast();
 
   return (
     <div className="fadeup">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <h3 className="maru" style={{ fontSize: 16, fontWeight: 900, color: '#2c3140', margin: 0 }}>会の一覧</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <h3 className="maru" style={{ fontSize: 16, fontWeight: 900, color: '#2c3140', margin: 0 }}>会の管理</h3>
+          {/* リスト/カレンダー切替 */}
+          <div style={{
+            display: 'flex', background: '#f0eee8',
+            borderRadius: 8, padding: 3,
+          }}>
+            <button onClick={() => setViewMode('list')} style={{
+              padding: '7px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+              background: viewMode === 'list' ? '#2c3140' : 'transparent',
+              color: viewMode === 'list' ? '#fff' : '#6b6e7a',
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              transition: 'all 0.15s',
+            }}><List size={12} /> 一覧</button>
+            <button onClick={() => setViewMode('calendar')} style={{
+              padding: '7px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+              background: viewMode === 'calendar' ? '#2c3140' : 'transparent',
+              color: viewMode === 'calendar' ? '#fff' : '#6b6e7a',
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              transition: 'all 0.15s',
+            }}><LayoutGrid size={12} /> カレンダー</button>
+          </div>
+        </div>
         <button onClick={() => setCreating(true)} style={{
           padding: '10px 18px', background: '#2c3140', border: 'none', color: '#fff',
           borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
@@ -2166,6 +2620,16 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
         ><Plus size={13} /> 新しい会を作成</button>
       </div>
 
+      {viewMode === 'calendar' ? (
+        <MonthCalendar
+          yearMonth={yearMonth}
+          setYearMonth={setYearMonth}
+          sessions={sessions}
+          participants={participants}
+          mode="admin"
+          onDayClick={(date, daySessions) => { setPopupDate(date); setPopupSessions(daySessions); }}
+        />
+      ) : (
       <div style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12, overflow: 'hidden' }}>
         <div style={{
           display: 'grid', gridTemplateColumns: '90px 90px 1fr 80px 70px 130px',
@@ -2237,6 +2701,17 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
           );
         })}
       </div>
+      )}
+
+      {popupDate && (
+        <DaySessionsPopup
+          date={popupDate}
+          sessions={popupSessions}
+          participants={participants}
+          onClose={() => setPopupDate(null)}
+          onSelect={(s) => { setEditingSession(s); }}
+        />
+      )}
 
       {editing && <ClosedInviteModal session={editing} updateSession={updateSession} onClose={() => setEditing(null)} />}
       {creating && <SessionFormModal mode="create" onSave={(newSession) => { addSession(newSession); toast.push(`「${newSession.customTitle || PLAN_DEFS[newSession.plan].label}」を作成しました`, 'success'); setCreating(false); }} onClose={() => setCreating(false)} />}

@@ -4,17 +4,18 @@ rules_version = '2';
 // Firestore セキュリティルール
 // =====================================================================
 // 方針:
-//   - 認証済み（＝運営者。現状ログインするのは運営者のみ）だけが全コレクションを直接読み書き可
-//   - 未認証（＝参加者）は全拒否。公開情報の閲覧・予約・日程調整の回答は
-//     Cloud Functions の窓口（Admin SDK でルールを迂回）経由でのみ行う
+//   - 運営者（admin カスタムクレーム）だけが全コレクションを直接読み書き可
+//   - それ以外（参加者は Google ログイン＝認証済みだが admin クレーム無し／未認証）は全拒否
+//   - 公開情報の閲覧・予約・回答などは Cloud Functions の窓口（Admin SDK でルールを迂回）経由のみ
 //   - これにより customers（顧客の個人情報）は参加者から一切到達できない
 //
-// ⚠️ デプロイのタイミング: このルールは段階 S4 で初めて deploy する。
-//    それまでは Firebase コンソールのテストモードのまま（早期に deploy すると参加者画面が壊れる）。
+// ⚠️ 重要: 参加者も Google ログインするため request.auth != null では不十分（参加者に全権限が渡る）。
+//          必ず admin クレームで判定する。
+// ⚠️ デプロイのタイミング: このルールは段階 S4 で立ち会いのうえ deploy する。
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if request.auth != null && request.auth.token.admin == true;
     }
   }
 }

@@ -12,34 +12,12 @@
 const admin = require('firebase-admin');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
-const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 
 admin.initializeApp();
 setGlobalOptions({ region: 'asia-northeast1' });
 
 const db = admin.firestore();
-
-// ※一時: 運営者に admin カスタムクレームを一度だけ付与するための関数。
-//   シークレットはソース直書きせず Functions Secret（ADMIN_CLAIM_SECRET）で管理。
-//   付与完了後、この関数とフロントの一時ボタンは S4 で削除する。
-const ADMIN_CLAIM_SECRET = defineSecret('ADMIN_CLAIM_SECRET');
-exports.claimAdmin = onCall({ secrets: [ADMIN_CLAIM_SECRET] }, async (request) => {
-  try {
-    if (!request.auth) throw new HttpsError('unauthenticated', 'ログインしてから実行してください。');
-    const provided = (request.data && request.data.secret) || '';
-    const expected = ADMIN_CLAIM_SECRET.value();
-    if (!expected || provided !== expected) {
-      throw new HttpsError('permission-denied', 'シークレットが一致しません。');
-    }
-    await admin.auth().setCustomUserClaims(request.auth.uid, { admin: true });
-    return { ok: true, uid: request.auth.uid };
-  } catch (err) {
-    if (err instanceof HttpsError) throw err;
-    logger.error('claimAdmin failed', err);
-    throw new HttpsError('internal', '権限付与に失敗しました。');
-  }
-});
 
 // プランの定員・ブランド（フロントの PLAN_DEFS と一致させること。capacity/brand のみ）
 // ※ App.jsx の PLAN_DEFS を変更したら、ここも同期する

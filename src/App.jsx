@@ -7,7 +7,7 @@ import {
   List, LayoutGrid, CalendarDays, ListChecks, LogOut,
 } from 'lucide-react';
 import { signIn, signInWithGoogle, signOutUser, onAuthChange } from './lib/auth';
-import { claimAdmin, claimProfile, fetchPublicData, fetchMyData, bookSession, cancelReservation, reportPayment, updateMyProfile, answerPoll } from './lib/functions'; // claimAdmin は※一時（S4で削除）
+import { claimProfile, fetchPublicData, fetchMyData, bookSession, cancelReservation, reportPayment, updateMyProfile, answerPoll } from './lib/functions';
 import {
   subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
   subscribeCustomers, seedCustomers,
@@ -3347,36 +3347,6 @@ function AdminNoPermission() {
         padding: '10px 18px', background: '#fff', border: '1px solid #d4d0c8', color: '#2c3140',
         borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
       }}>ログアウト</button>
-      <div style={{ marginTop: 24, textAlign: 'left' }}><AdminClaimBanner />{/* ※一時: 運営者がクレーム取得するための導線。S4で削除 */}</div>
-    </div>
-  );
-}
-
-// ※一時: 運営者クレーム(admin:true)が未付与のとき、付与を促すバナー。S4で削除する。
-function AdminClaimBanner() {
-  const { isAdmin } = useAuth();
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  if (isAdmin) return null;
-  const run = async () => {
-    const secret = window.prompt('運営者権限を取得します。設定したシークレット（ADMIN_CLAIM_SECRET）を入力してください。');
-    if (!secret) return;
-    setBusy(true);
-    try {
-      await claimAdmin(secret);
-      toast.push('運営者権限を付与しました。反映のため一度ログアウト→再ログインしてください。', 'success');
-    } catch (e) {
-      toast.push(`付与に失敗: ${e.code || ''} ${e.message || ''}`, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div style={{ marginBottom: 16, padding: '12px 16px', background: '#fffbe8', border: '1px dashed #c9962a', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 12, color: '#a47b1f', fontWeight: 700 }}>【一時】このアカウントには運営者権限(admin)が未付与です。</span>
-      <button onClick={run} disabled={busy} style={{ padding: '7px 14px', background: '#c9962a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700 }}>
-        {busy ? '付与中…' : '運営者権限を取得'}
-      </button>
     </div>
   );
 }

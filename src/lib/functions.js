@@ -48,8 +48,3 @@ export function bookSession(payload) {
 export function answerPoll(payload) {
   return httpsCallable(fns, 'submitPollResponse')(payload).then((r) => r.data);
 }
-
-// ※一時: 運営者クレーム付与（S4 で関数ごと削除する）
-export function claimAdmin(secret) {
-  return httpsCallable(fns, 'claimAdmin')({ secret }).then((r) => r.data);
-}

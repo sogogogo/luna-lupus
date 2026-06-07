@@ -3306,6 +3306,53 @@ function AdminNoPermission() {
   );
 }
 
+// =====================================================================
+// 管理画面の「今後実装予定」案内（管理者のみ。参加者画面には一切出さない）
+//   kind 'planned' = Phase 2 予定（機能未実装・グレー系）
+//   kind 'expand'  = 拡張予定（簡易版は現在も稼働・ブランド淡色）
+//   ※対象タブはここ1箇所で増減できる
+// =====================================================================
+const PHASE_NOTES = {
+  announce:  { kind: 'planned', note: '配信機能はPhase 2で実装予定です。現在は告知内容の記録・管理がご利用いただけます。メール・SNSへの自動配信は次フェーズで対応します。' },
+  payments:  { kind: 'expand',  note: '現在は送金の自己申告・確認方式でご利用いただけます。PayPay自動決済との完全連携はPhase 2で対応予定です。' },
+  customers: { kind: 'expand',  note: '顧客情報の閲覧・基本管理がご利用いただけます。詳細な編集機能はPhase 2で拡張予定です。' },
+  roles:     { kind: 'expand',  note: '役職の割り振り機能がご利用いただけます。配役履歴の保存・分析はPhase 2で対応予定です。' },
+};
+const PHASE_BADGE_LABEL = { planned: 'Phase 2 予定', expand: '拡張予定' };
+
+// タブ名の横に出す小さなバッジ
+function PhaseBadge({ kind }) {
+  const planned = kind === 'planned';
+  const style = planned
+    ? { background: '#eceae4', color: '#9499a8', border: '1px solid #ddd9d0' }
+    : { background: `${BRAND.stepup.primary}14`, color: BRAND.stepup.primary, border: `1px solid ${BRAND.stepup.primary}40` };
+  return (
+    <span style={{ marginLeft: 5, padding: '1px 6px', borderRadius: 999, fontSize: 9, fontWeight: 700, lineHeight: 1.4, ...style }}>
+      {PHASE_BADGE_LABEL[kind]}
+    </span>
+  );
+}
+
+// タブを開いたときの案内パネル
+function PhaseNote({ info }) {
+  const planned = info.kind === 'planned';
+  const accent = planned ? '#9499a8' : BRAND.stepup.primary;
+  return (
+    <div style={{
+      marginBottom: 20, padding: '12px 16px', borderRadius: 12,
+      background: planned ? '#faf9f6' : `${BRAND.stepup.primary}0d`,
+      border: `1px solid ${planned ? '#e8e5dd' : `${BRAND.stepup.primary}33`}`,
+      display: 'flex', gap: 10, alignItems: 'flex-start',
+    }}>
+      <Sparkles size={15} color={accent} style={{ flexShrink: 0, marginTop: 1 }} />
+      <div>
+        <div style={{ marginBottom: 3 }}><PhaseBadge kind={info.kind} /></div>
+        <div className="maru" style={{ fontSize: 12, color: '#6b6e7a', lineHeight: 1.7 }}>{info.note}</div>
+      </div>
+    </div>
+  );
+}
+
 function AdminView({ sessions, participants, updateParticipant, updateSession, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, deleteSchedulePoll, announceHistory, addAnnounce }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -3332,10 +3379,12 @@ function AdminView({ sessions, participants, updateParticipant, updateSession, a
               borderBottom: `2px solid ${active ? '#2c3140' : 'transparent'}`,
               cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
               display: 'flex', alignItems: 'center', gap: 6, marginBottom: -1, whiteSpace: 'nowrap',
-            }}><Icon size={13} /> {t.label}</button>
+            }}><Icon size={13} /> {t.label}{PHASE_NOTES[t.id] && <PhaseBadge kind={PHASE_NOTES[t.id].kind} />}</button>
           );
         })}
       </div>
+
+      {PHASE_NOTES[tab] && <PhaseNote info={PHASE_NOTES[tab]} />}
 
       {tab === 'dashboard' && <Dashboard sessions={sessions} participants={participants} />}
       {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} deleteSchedulePoll={deleteSchedulePoll} addAnnounce={addAnnounce} />}

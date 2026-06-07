@@ -491,11 +491,36 @@ function ParticipantProvider({ children }) {
   );
 }
 
+// 描画クラッシュ時に白画面を防ぐエラーバウンダリ（再読み込み導線つき）
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch() { /* 必要なら監視サービスへ送信 */ }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, textAlign: 'center', background: '#fbfaf7', color: '#2c3140', fontFamily: '"Inter", "Hiragino Maru Gothic ProN", sans-serif' }}>
+          <div style={{ fontSize: 34 }}>🐺</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>表示中に問題が発生しました</div>
+          <div style={{ fontSize: 12, color: '#9499a8', lineHeight: 1.8, maxWidth: 320 }}>
+            ページを再読み込みしてください。<br />改善しない場合は、ブラウザの「翻訳」をオフにしてお試しください。
+          </div>
+          <button onClick={() => window.location.reload()} style={{ marginTop: 8, padding: '10px 22px', background: '#2c3140', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700 }}>
+            再読み込み
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // =====================================================================
 // ルート
 // =====================================================================
 export default function App() {
   return (
+    <ErrorBoundary>
     <ToastProvider>
       <AuthProvider>
         <CustomersProvider>
@@ -505,6 +530,7 @@ export default function App() {
         </CustomersProvider>
       </AuthProvider>
     </ToastProvider>
+    </ErrorBoundary>
   );
 }
 

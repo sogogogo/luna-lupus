@@ -10,7 +10,7 @@
 import { db } from './firebase';
 import {
   collection, getDocs, onSnapshot,
-  doc, addDoc, setDoc, updateDoc, deleteDoc,
+  doc, addDoc, setDoc, updateDoc, deleteDoc, writeBatch,
 } from 'firebase/firestore';
 
 const SESSIONS = 'sessions';
@@ -192,4 +192,19 @@ export async function seedAnnouncements(entriesArr) {
   await Promise.all(
     entriesArr.map((e, i) => setDoc(doc(db, ANNOUNCEMENTS_COL, `seed-${i}`), clean(e))),
   );
+}
+
+// =====================================================================
+// 日程調整の確定を原子的にコミット（会作成＋参加者登録＋ポール更新を1バッチ）
+//   全部成功か全部失敗か。中途半端な状態・会の二重作成を防ぐ。
+//   告知は非クリティカルのためバッチ外（呼び出し側でバッチ成功後に実行）。
+// =====================================================================
+export async function commitPollConfirmation({ session, participants, pollId, pollPatch }) {
+  const batch = writeBatch(db);
+  batch.set(doc(db, SESSIONS, String(session.id)), clean(session));
+  (participants || []).forEach((p) => {
+    batch.set(doc(db, PARTICIPANTS_COL, String(p.id)), clean(p));
+  });
+  batch.update(doc(db, SCHEDULE_POLLS_COL, String(pollId)), clean(pollPatch));
+  await batch.commit();
 }

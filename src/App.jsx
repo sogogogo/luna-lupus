@@ -11,10 +11,11 @@ import { claimProfile, fetchPublicData, fetchMyData, bookSession, cancelReservat
 import {
   subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
   subscribeCustomers, seedCustomers,
-  subscribeParticipants, saveParticipant, patchParticipant, removeParticipant, seedParticipants,
+  subscribeParticipants, patchParticipant, removeParticipant, seedParticipants,
   subscribeSchedulePolls, saveSchedulePoll, patchSchedulePoll, removeSchedulePoll, seedSchedulePolls,
   subscribePollResponses, removePollResponse, seedPollResponses,
   subscribeAnnouncements, addAnnouncement, seedAnnouncements,
+  commitPollConfirmation,
 } from './lib/firestore';
 // =====================================================================
 // ブランドアイコン（base64 PNG・お客さん提供）
@@ -581,9 +582,6 @@ function AppInner() {
   const updateParticipant = (id, patch) => {
     patchParticipant(id, patch).catch(() => toast.push('参加者の更新に失敗しました', 'error'));
   };
-  const addParticipant = (newParticipant) => {
-    saveParticipant(newParticipant).catch(() => toast.push('参加登録に失敗しました', 'error'));
-  };
   // sessions のミューテータは Firestore へ書き込み、画面反映は onSnapshot に任せる（local setSessions しない）
   const updateSession = (id, patch) => {
     patchSession(id, patch).catch(() => toast.push('会の更新に失敗しました', 'error'));
@@ -728,7 +726,7 @@ function AppInner() {
               ? <AdminNoPermission />
               : sessionsLoading
               ? <SessionsLoading />
-              : <AdminView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} deleteSchedulePoll={deleteSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />)
+              : <AdminView sessions={sessions} participants={participants} updateParticipant={updateParticipant} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} deleteSchedulePoll={deleteSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />)
           : <CustomerView brandFilter={brandFilter} setBrandFilter={setBrandFilter} />
         }
       </main>
@@ -3308,7 +3306,7 @@ function AdminNoPermission() {
   );
 }
 
-function AdminView({ sessions, participants, updateParticipant, addParticipant, updateSession, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, deleteSchedulePoll, announceHistory, addAnnounce }) {
+function AdminView({ sessions, participants, updateParticipant, updateSession, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, deleteSchedulePoll, announceHistory, addAnnounce }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
@@ -3340,7 +3338,7 @@ function AdminView({ sessions, participants, updateParticipant, addParticipant, 
       </div>
 
       {tab === 'dashboard' && <Dashboard sessions={sessions} participants={participants} />}
-      {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} deleteSchedulePoll={deleteSchedulePoll} addSession={addSession} addParticipant={addParticipant} addAnnounce={addAnnounce} />}
+      {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} deleteSchedulePoll={deleteSchedulePoll} addAnnounce={addAnnounce} />}
       {tab === 'sessions' && <SessionsAdmin sessions={sessions} participants={participants} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} />}
       {tab === 'payments' && <PaymentsAdmin sessions={sessions} participants={participants} updateParticipant={updateParticipant} />}
       {tab === 'roles' && (selectedSession
@@ -3449,15 +3447,22 @@ function PollCard({ poll, pollResponses, onClick }) {
   );
 }
 
-function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, deleteSchedulePoll, addSession, addParticipant, addAnnounce }) {
+function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, deleteSchedulePoll, addAnnounce }) {
   const toast = useToast();
   const [showClosed, setShowClosed] = useState(false);
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(null); // { mode: 'create' } | { mode: 'edit', poll }
   const [deletingPoll, setDeletingPoll] = useState(null); // 削除確認対象
 
-  // 候補日を確定 → 会作成・◯回答者を参加者登録・ポール更新・告知履歴追記
-  const confirmPoll = (poll, colIdx, opts = {}) => {
+  // 候補日を確定 → 会作成・◯回答者を参加者登録・ポール更新 を「1つの writeBatch」で原子的に。
+  // 全部成功か全部失敗か（中途半端な状態・会の二重作成を防止）。告知は非クリティカルでバッチ外。
+  const confirmPoll = async (poll, colIdx, opts = {}) => {
+    // 二重確定ガード：既に確定済みなら何もしない
+    if (poll.status === 'confirmed') {
+      toast.push('この日程調整は既に確定済みです', 'warn');
+      return;
+    }
+
     const cd = poll.candidateDates[colIdx];
     const planKey = poll.plan || opts.planKey || null;
     const planDef = planKey ? PLAN_DEFS[planKey] : null;
@@ -3486,7 +3491,6 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
       status: 'open',
       fromPollId: poll.id, // 由来をたどれるように
     };
-    addSession(newSession);
 
     // ◯回答者を参加者として自動登録（未払い）
     const yesResponders = pollResponses.filter(r => r.pollId === poll.id && r.answers && r.answers[colIdx] === 'yes');
@@ -3497,12 +3501,21 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
       paid: false, paidAt: null,
       cancelled: false, refunded: false, role: null,
     }));
-    newParticipants.forEach(p => addParticipant(p));
 
-    // ポールを確定済みに（プラン未定だった場合は確定時に選んだ plan/brand も反映）
-    updateSchedulePoll(poll.id, { status: 'confirmed', confirmedIndex: colIdx, plan: planKey, brand: brandKey });
+    try {
+      // 会作成＋参加者登録＋ポール更新を原子的にコミット
+      await commitPollConfirmation({
+        session: newSession,
+        participants: newParticipants,
+        pollId: poll.id,
+        pollPatch: { status: 'confirmed', confirmedIndex: colIdx, plan: planKey, brand: brandKey },
+      });
+    } catch {
+      toast.push('確定に失敗しました。時間をおいて再度お試しください。', 'error');
+      return; // 失敗時はバッチ全体が未反映＝不整合なし。告知も出さない
+    }
 
-    // 告知センター履歴に自動エントリ
+    // 告知センター履歴（非クリティカル。失敗してもログのみで確定自体は成立済み）
     addAnnounce({
       date: nowISO(), channel: '日程確定', target: poll.title,
       subject: `日程調整「${poll.title}」を確定（${fmtMD(cd.date, cd.day)}開催）`,

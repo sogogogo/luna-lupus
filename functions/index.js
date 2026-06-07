@@ -148,6 +148,89 @@ function nowStamp() {
   return new Date().toISOString().slice(0, 16).replace('T', ' ');
 }
 
+// X ハンドルの正規化（先頭@/＠除去・全空白除去・小文字化）。入力と保存値の両方に適用して比較する
+function normalizeHandle(h) {
+  if (h == null) return '';
+  return String(h).replace(/\s+/g, '').replace(/^[@＠]+/, '').toLowerCase();
+}
+// 参加者本人に返してよい最小限のプロフィール（notes/phone/email/spent は返さない）
+function toSafeProfile(c) {
+  return {
+    id: c.id,
+    name: c.name || '',
+    handle: c.handle || null,
+    tier: c.tier || '新規',
+    total: c.total ?? 0,
+    favorite: c.favorite || null,
+  };
+}
+
+// =====================================================================
+// 参加者: プロフィールのリンク/取得（Google ログイン後）
+//   - uid に既にリンク済み顧客があれば返す（ハンドル不要）
+//   - 未リンクでハンドル未指定なら { linked:false }（フロントが入力UIを出す）
+//   - ハンドル指定時: 既存顧客と正規化照合し、未リンクならリンク。なければ新規作成。
+//   - なりすまし対策: 既に別 uid にリンク済みの顧客へは結びつけず、新規顧客を作る
+//   - 返すのは安全プロフィールのみ
+// =====================================================================
+exports.claimProfile = onCall(async (request) => {
+  try {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'ログインしてください。');
+    const uid = request.auth.uid;
+    const rawHandle = (request.data && request.data.handle) || '';
+    const normHandle = normalizeHandle(rawHandle);
+
+    const snap = await db.collection('customers').get();
+
+    // 1) 既に uid にリンク済み → そのまま返す
+    const linkedDoc = snap.docs.find((d) => d.data().authUid === uid);
+    if (linkedDoc) return { linked: true, profile: toSafeProfile(linkedDoc.data()) };
+
+    // 2) ハンドル未指定 → 入力を促す
+    if (!normHandle) return { linked: false };
+    if (normHandle.length > 50) throw new HttpsError('invalid-argument', 'ハンドル名が長すぎます。');
+
+    // 3) 正規化一致の既存顧客
+    const matchDoc = snap.docs.find((d) => normalizeHandle(d.data().handle) === normHandle);
+    if (matchDoc && !matchDoc.data().authUid) {
+      // 未リンク → トランザクションで再確認してリンク
+      const ref = matchDoc.ref;
+      const profile = await db.runTransaction(async (tx) => {
+        const fresh = await tx.get(ref);
+        const c = fresh.data();
+        if (c.authUid && c.authUid !== uid) return null; // 競合
+        tx.update(ref, { authUid: uid, handleNorm: normHandle });
+        return toSafeProfile({ ...c, authUid: uid });
+      });
+      if (profile) return { linked: true, profile };
+      // 競合時は新規作成へ
+    }
+
+    // 4) 新規顧客を作成（既存に紐づけない＝なりすまし防止）
+    const newId = Date.now();
+    const displayName = (request.auth.token && request.auth.token.name) || rawHandle.trim() || 'ゲスト';
+    const newCustomer = {
+      id: newId,
+      authUid: uid,
+      name: displayName,
+      handle: '@' + normHandle,
+      handleNorm: normHandle,
+      phone: '', email: '',
+      joined: new Date().toISOString().slice(0, 10),
+      total: 0, lastVisit: null, spent: 0,
+      tier: '新規', favorite: null, notes: '',
+      avatar: displayName.slice(0, 1),
+      createdVia: 'self',
+    };
+    await db.collection('customers').doc(String(newId)).set(newCustomer);
+    return { linked: true, profile: toSafeProfile(newCustomer), created: true };
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    logger.error('claimProfile failed', err);
+    throw new HttpsError('internal', 'プロフィールの設定に失敗しました。');
+  }
+});
+
 // =====================================================================
 // 窓口1: 公開情報の読み取り
 // =====================================================================

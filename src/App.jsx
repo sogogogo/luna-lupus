@@ -6,8 +6,8 @@ import {
   AlertTriangle, Bell, Hash, MessageCircle, Link2, Zap, MapPin, Lock, UserCheck, Plus,
   List, LayoutGrid, CalendarDays, ListChecks, LogOut,
 } from 'lucide-react';
-import { signIn, signOutUser, onAuthChange } from './lib/auth';
-import { claimAdmin } from './lib/functions'; // ※一時: 運営者クレーム付与（S4で削除）
+import { signIn, signInWithGoogle, signOutUser, onAuthChange } from './lib/auth';
+import { claimAdmin, claimProfile } from './lib/functions'; // claimAdmin は※一時（S4で削除）
 import {
   subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
   subscribeCustomers, seedCustomers,
@@ -433,6 +433,50 @@ function CustomersProvider({ children }) {
 }
 
 // =====================================================================
+// 参加者プロフィール（Cloud Functions 経由）— Google ログイン後に解決
+//   profile: 自分の安全プロフィール（最小開示） / needHandle: 初回ハンドル入力が必要
+//   linkHandle(handle): 初回リンク / loading: 解決中
+//   ※運営者(isAdmin)や未ログイン時は解決しない
+// =====================================================================
+const ParticipantContext = createContext({ profile: null, needHandle: false, loading: false, linkHandle: async () => {} });
+const useParticipant = () => useContext(ParticipantContext);
+
+function ParticipantProvider({ children }) {
+  const { user, isAdmin } = useAuth();
+  const toast = useToast();
+  const [profile, setProfile] = useState(null);
+  const [needHandle, setNeedHandle] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (!user || isAdmin) { setProfile(null); setNeedHandle(false); setLoading(false); return; }
+    setLoading(true);
+    claimProfile({})
+      .then(res => {
+        if (!active) return;
+        if (res.linked) { setProfile(res.profile); setNeedHandle(false); }
+        else { setProfile(null); setNeedHandle(true); }
+      })
+      .catch(() => { if (active) toast.push('プロフィールの取得に失敗しました', 'error'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [user, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const linkHandle = async (handle) => {
+    const res = await claimProfile({ handle });
+    if (res.linked) { setProfile(res.profile); setNeedHandle(false); }
+    return res;
+  };
+
+  return (
+    <ParticipantContext.Provider value={{ profile, needHandle, loading, linkHandle }}>
+      {children}
+    </ParticipantContext.Provider>
+  );
+}
+
+// =====================================================================
 // ルート
 // =====================================================================
 export default function App() {
@@ -440,7 +484,9 @@ export default function App() {
     <ToastProvider>
       <AuthProvider>
         <CustomersProvider>
-          <AppInner />
+          <ParticipantProvider>
+            <AppInner />
+          </ParticipantProvider>
         </CustomersProvider>
       </AuthProvider>
     </ToastProvider>
@@ -772,6 +818,93 @@ function LoginScreen() {
   );
 }
 
+// 参加者のログイン状態バー（未ログイン=Googleログイン誘導 / ログイン済み=ようこそ＋ログアウト）
+// ＋ 初回の X ハンドル入力モーダル
+function ParticipantAuthBar() {
+  const { user, isAdmin } = useAuth();
+  const { profile, needHandle, linkHandle } = useParticipant();
+  const toast = useToast();
+  const [handle, setHandle] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  // 運営者が参加者画面を見ている場合は参加者ログインUIを出さない
+  if (user && isAdmin) return null;
+
+  const login = async () => {
+    try { await signInWithGoogle(); }
+    catch (e) {
+      if (e?.code !== 'auth/popup-closed-by-user' && e?.code !== 'auth/cancelled-popup-request') {
+        toast.push('ログインに失敗しました', 'error');
+      }
+    }
+  };
+  const logout = async () => { await signOutUser(); toast.push('ログアウトしました', 'info'); setDismissed(false); };
+  const submitHandle = async () => {
+    if (!handle.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await linkHandle(handle);
+      if (res.linked) toast.push(res.created ? 'アカウントを作成しました' : `おかえりなさい、${res.profile.name}さん`, 'success');
+    } catch (e) {
+      toast.push(`設定に失敗しました: ${e.message || ''}`, 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      {!user ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 16px', background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12 }}>
+          <span style={{ fontSize: 12, color: '#6b6e7a', flex: 1 }}>予約やマイページのご利用にはログインが必要です（閲覧はログインなしでOK）</span>
+          <button onClick={login} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 16px', background: '#fff', border: '1px solid #d4d0c8', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, color: '#2c3140' }}>
+            <span style={{ fontWeight: 900, color: '#4285F4' }}>G</span> Google でログイン
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 16px', background: '#f6f8f6', border: '1px solid #e0e8e0', borderRadius: 12 }}>
+          <span style={{ fontSize: 13, color: '#2c3140', fontWeight: 700, flex: 1 }}>
+            {profile ? `ようこそ、${profile.name} さん` : (needHandle ? 'Xハンドルを設定してください' : 'ログイン中…')}
+          </span>
+          {needHandle && dismissed && (
+            <button onClick={() => setDismissed(false)} style={{ padding: '7px 12px', background: '#c9962a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700 }}>Xハンドルを設定</button>
+          )}
+          <button onClick={logout} style={{ padding: '7px 12px', background: '#fff', border: '1px solid #d4d0c8', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700, color: '#6b6e7a' }}>ログアウト</button>
+        </div>
+      )}
+
+      {/* 初回: X ハンドル入力モーダル */}
+      {needHandle && !dismissed && (
+        <ModalShell onClose={() => setDismissed(true)} maxWidth={440}>
+          <ModalHeader title="X（Twitter）ハンドルを入力" subtitle="いつもの X ハンドルを入れると、過去の参加履歴に引き継がれます" icon={<UserCheck size={16} />} onClose={() => setDismissed(true)} accent={BRAND.okiraku.primary} />
+          <div style={{ padding: '18px 24px' }}>
+            <label style={{ display: 'block', fontSize: 11, color: '#6b6e7a', fontWeight: 700, marginBottom: 6 }}>X ハンドル</label>
+            <input
+              value={handle} onChange={(e) => setHandle(e.target.value)}
+              placeholder="@your_handle"
+              onKeyDown={(e) => { if (e.key === 'Enter') submitHandle(); }}
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 11, color: '#9499a8', marginTop: 8 }}>
+              @ の有無・大文字小文字は自動で揃えます。新しい方は新規登録になります。
+            </div>
+          </div>
+          <div style={{ padding: 16, borderTop: '1px solid #f0ede5', display: 'flex', gap: 8 }}>
+            <button onClick={() => setDismissed(true)} style={{ flex: 1, padding: 11, background: '#fff', border: '1px solid #d4d0c8', color: '#2c3140', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600 }}>あとで</button>
+            <button onClick={submitHandle} disabled={!handle.trim() || submitting} style={{
+              flex: 2, padding: 11,
+              background: handle.trim() && !submitting ? `linear-gradient(135deg, ${BRAND.okiraku.primary}, ${BRAND.okiraku.accent})` : '#e0ddd6',
+              border: 'none', color: '#fff', borderRadius: 8, cursor: handle.trim() && !submitting ? 'pointer' : 'not-allowed',
+              fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+            }}>{submitting ? '設定中…' : 'この内容で設定'}</button>
+          </div>
+        </ModalShell>
+      )}
+    </div>
+  );
+}
+
 // =====================================================================
 // 参加者側
 // =====================================================================
@@ -915,6 +1048,7 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
 
   return (
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: '32px 28px 80px' }}>
+      <ParticipantAuthBar />
       {(() => {
         const heroBrand = filter === 'all' ? BRAND.okiraku : BRAND[filter];
         return (

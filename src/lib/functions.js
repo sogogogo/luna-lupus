@@ -14,6 +14,11 @@ export function fetchPublicData() {
   return httpsCallable(fns, 'getPublicData')().then((r) => r.data);
 }
 
+// 参加者: プロフィールのリンク/取得（Google ログイン後）。{ handle? } を渡す
+export function claimProfile(payload) {
+  return httpsCallable(fns, 'claimProfile')(payload || {}).then((r) => r.data);
+}
+
 // 窓口2: 予約（サーバー側で定員チェック）
 export function bookSession(payload) {
   return httpsCallable(fns, 'createReservation')(payload).then((r) => r.data);

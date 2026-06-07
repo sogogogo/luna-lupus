@@ -34,6 +34,11 @@ export function reportPayment(payload) {
   return httpsCallable(fns, 'reportPayment')(payload).then((r) => r.data);
 }
 
+// 参加者: プロフィール編集（表示名・Xハンドル）
+export function updateMyProfile(payload) {
+  return httpsCallable(fns, 'updateMyProfile')(payload).then((r) => r.data);
+}
+
 // 窓口2: 予約（サーバー側で定員チェック）
 export function bookSession(payload) {
   return httpsCallable(fns, 'createReservation')(payload).then((r) => r.data);

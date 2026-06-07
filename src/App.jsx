@@ -7,7 +7,7 @@ import {
   List, LayoutGrid, CalendarDays, ListChecks, LogOut,
 } from 'lucide-react';
 import { signIn, signInWithGoogle, signOutUser, onAuthChange } from './lib/auth';
-import { claimAdmin, claimProfile, fetchMyData, bookSession, cancelReservation, reportPayment, answerPoll } from './lib/functions'; // claimAdmin は※一時（S4で削除）
+import { claimAdmin, claimProfile, fetchMyData, bookSession, cancelReservation, reportPayment, updateMyProfile, answerPoll } from './lib/functions'; // claimAdmin は※一時（S4で削除）
 import {
   subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
   subscribeCustomers, seedCustomers,
@@ -3142,8 +3142,50 @@ function BookingDone({ session, onHome }) {
 }
 
 // ============ マイページ ============
+// 参加者プロフィール編集モーダル（表示名・Xハンドル）
+function ProfileEditModal({ profile, onClose, onSaved }) {
+  const toast = useToast();
+  const [name, setName] = useState(profile?.name || '');
+  const [handle, setHandle] = useState(profile?.handle || '');
+  const [saving, setSaving] = useState(false);
+  const canSave = name.trim() && handle.trim() && !saving;
+  const save = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      await updateMyProfile({ name: name.trim(), handle });
+      toast.push('プロフィールを更新しました', 'success');
+      onSaved();
+      onClose();
+    } catch (e) {
+      toast.push(e.message || 'プロフィールの更新に失敗しました', 'error');
+      setSaving(false);
+    }
+  };
+  return (
+    <ModalShell onClose={onClose} maxWidth={420}>
+      <ModalHeader title="プロフィール編集" icon={<User size={16} />} onClose={onClose} accent={BRAND.okiraku.primary} />
+      <div style={{ padding: '18px 24px' }}>
+        <Field label="表示名"><input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} /></Field>
+        <Field label="X ハンドル"><input value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="@your_handle" style={inputStyle} /></Field>
+        <div style={{ fontSize: 11, color: '#9499a8' }}>@ の有無・大文字小文字は自動で揃えます。他の方と重複するハンドルには変更できません。</div>
+      </div>
+      <div style={{ padding: 16, borderTop: '1px solid #f0ede5', display: 'flex', gap: 8 }}>
+        <button onClick={onClose} style={{ flex: 1, padding: 11, background: '#fff', border: '1px solid #d4d0c8', color: '#2c3140', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600 }}>キャンセル</button>
+        <button onClick={save} disabled={!canSave} style={{
+          flex: 2, padding: 11,
+          background: canSave ? `linear-gradient(135deg, ${BRAND.okiraku.primary}, ${BRAND.okiraku.accent})` : '#e0ddd6',
+          border: 'none', color: '#fff', borderRadius: 8, cursor: canSave ? 'pointer' : 'not-allowed',
+          fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+        }}>{saving ? '保存中…' : '保存'}</button>
+      </div>
+    </ModalShell>
+  );
+}
+
 function MyPage({ onBack }) {
-  const { profile: me, bookings } = useParticipant();
+  const { profile: me, bookings, refresh } = useParticipant();
+  const [editing, setEditing] = useState(false);
   if (!me) return (
     <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="ホームに戻る" />
@@ -3159,6 +3201,7 @@ function MyPage({ onBack }) {
   return (
     <div className="fadeup" style={{ maxWidth: 880, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="ホームに戻る" accent={BRAND.okiraku.primary} />
+      {editing && <ProfileEditModal profile={me} onClose={() => setEditing(false)} onSaved={refresh} />}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 18, marginBottom: 28 }}>
         <div style={{
@@ -3178,6 +3221,13 @@ function MyPage({ onBack }) {
             background: '#fff', color: BRAND.okiraku.primary,
             fontSize: 10, fontWeight: 700, borderRadius: 999,
           }}>{me.tier}</div>
+          <div>
+            <button onClick={() => setEditing(true)} style={{
+              marginTop: 12, padding: '6px 14px', background: '#fff', border: '1px solid #d4d0c8',
+              color: '#6b6e7a', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+            }}><User size={12} /> プロフィール編集</button>
+          </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
           <Stat label="参加回数" value={me.total} unit="回" />

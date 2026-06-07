@@ -298,6 +298,36 @@ exports.getMyData = onCall(async (request) => {
 });
 
 // =====================================================================
+// 参加者: 自分のプロフィール編集（表示名・Xハンドル）
+//   ハンドル変更時は他顧客との重複（正規化一致）を拒否
+// =====================================================================
+exports.updateMyProfile = onCall(async (request) => {
+  try {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'ログインしてください。');
+    const me = await resolveMyCustomer(request.auth.uid);
+    if (!me) throw new HttpsError('failed-precondition', 'プロフィール未設定です。');
+    const data = request.data || {};
+    const name = requireString(data.name, '表示名', { max: 50 });
+    const normHandle = normalizeHandle(data.handle);
+    if (!normHandle) throw new HttpsError('invalid-argument', 'Xハンドルを入力してください。');
+    if (normHandle.length > 50) throw new HttpsError('invalid-argument', 'Xハンドルが長すぎます。');
+
+    // 他の顧客が同じ正規化ハンドルを持っていないか
+    const snap = await db.collection('customers').get();
+    const conflict = snap.docs.find((d) => d.data().id !== me.id && normalizeHandle(d.data().handle) === normHandle);
+    if (conflict) throw new HttpsError('already-exists', 'そのXハンドルは既に使われています。');
+
+    const handle = '@' + normHandle;
+    await db.collection('customers').doc(String(me.id)).update({ name, handle, handleNorm: normHandle });
+    return { ok: true, profile: toSafeProfile({ ...me, name, handle }) };
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    logger.error('updateMyProfile failed', err);
+    throw new HttpsError('internal', 'プロフィール更新に失敗しました。');
+  }
+});
+
+// =====================================================================
 // 窓口1: 公開情報の読み取り
 // =====================================================================
 exports.getPublicData = onCall(async () => {

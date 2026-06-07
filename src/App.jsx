@@ -449,7 +449,7 @@ export default function App() {
 
 function AppInner() {
   const toast = useToast();
-  const { user, loading: authLoading } = useAuth();
+  const { user, isAdmin, loading: authLoading } = useAuth();
   const [view, setView] = useState('customer');
   const [sessions, setSessions] = useState([]);              // Firestore から読み込む（DB移行: sessions）
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -635,6 +635,8 @@ function AppInner() {
               ? <SessionsLoading label="認証情報を確認しています…" sub="ログイン状態を確認中" />
               : !user
               ? <LoginScreen />
+              : !isAdmin
+              ? <AdminNoPermission />
               : sessionsLoading
               ? <SessionsLoading />
               : <AdminView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />)
@@ -3029,6 +3031,27 @@ function Stat({ label, value, unit, small }) {
 // =====================================================================
 // 管理者側
 // =====================================================================
+// 管理画面に来たが運営者権限(admin)が無いユーザー向けの画面
+function AdminNoPermission() {
+  const toast = useToast();
+  return (
+    <div className="fadeup" style={{ maxWidth: 460, margin: '0 auto', padding: '70px 28px 80px', textAlign: 'center' }}>
+      <div style={{ width: 56, height: 56, margin: '0 auto 14px', borderRadius: 16, background: '#fce8e0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Lock size={24} color="#d97757" />
+      </div>
+      <h2 className="maru" style={{ fontSize: 20, fontWeight: 900, color: '#2c3140', margin: '0 0 6px' }}>運営者権限がありません</h2>
+      <p style={{ fontSize: 12, color: '#9499a8', lineHeight: 1.8, marginBottom: 20 }}>
+        この画面は運営者専用です。<br />参加者の方は上部の「参加者」タブからご利用ください。
+      </p>
+      <button onClick={async () => { await signOutUser(); toast.push('ログアウトしました', 'info'); }} style={{
+        padding: '10px 18px', background: '#fff', border: '1px solid #d4d0c8', color: '#2c3140',
+        borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+      }}>ログアウト</button>
+      <div style={{ marginTop: 24, textAlign: 'left' }}><AdminClaimBanner />{/* ※一時: 運営者がクレーム取得するための導線。S4で削除 */}</div>
+    </div>
+  );
+}
+
 // ※一時: 運営者クレーム(admin:true)が未付与のとき、付与を促すバナー。S4で削除する。
 function AdminClaimBanner() {
   const { isAdmin } = useAuth();
@@ -3065,7 +3088,6 @@ function AdminView({ sessions, participants, updateParticipant, addParticipant, 
 
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 80px' }}>
-      <AdminClaimBanner />{/* ※一時: 運営者クレーム未付与のとき表示。S4で削除 */}
       <div style={{ display: 'flex', gap: 2, marginBottom: 24, borderBottom: '1px solid #e8e5dd', overflowX: 'auto' }}>
         {[
           { id: 'dashboard', label: 'ダッシュボード', icon: TrendingUp },

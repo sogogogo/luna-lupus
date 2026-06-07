@@ -3534,11 +3534,15 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
   );
 
   // 削除確認ダイアログ（日程調整＋紐づく回答を削除）
+  const deleteBody = deletingPoll
+    ? `「${deletingPoll.title}」を削除しますか？\n紐づく回答もすべて削除されます。この操作は取り消せません。`
+      + (deletingPoll.status === 'confirmed' ? '\n\n※確定して作成された会は削除されません（会の管理から別途削除してください）。' : '')
+    : '';
   const deleteModal = deletingPoll && (
     <ConfirmModal
       icon={<AlertTriangle size={26} />}
       title="この日程調整を削除しますか？"
-      body={`「${deletingPoll.title}」と、紐づく全ての回答を削除します。\nこの操作は取り消せません。`}
+      body={deleteBody}
       confirmLabel="削除する"
       confirmColor="#d44a4a"
       onConfirm={() => {

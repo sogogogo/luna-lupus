@@ -727,9 +727,7 @@ function AppInner() {
               : sessionsLoading
               ? <SessionsLoading />
               : <AdminView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />)
-          : (sessionsLoading
-              ? <SessionsLoading />
-              : <CustomerView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} brandFilter={brandFilter} setBrandFilter={setBrandFilter} schedulePolls={schedulePolls} pollResponses={pollResponses} upsertPollResponse={upsertPollResponse} />)
+          : <CustomerView brandFilter={brandFilter} setBrandFilter={setBrandFilter} />
         }
       </main>
     </div>
@@ -949,9 +947,24 @@ function ParticipantAuthBar() {
 // =====================================================================
 // 参加者側
 // =====================================================================
-function CustomerView({ sessions, participants, updateParticipant, addParticipant, brandFilter, setBrandFilter, schedulePolls, pollResponses, upsertPollResponse }) {
-  const { profile, bookings, responses, refresh } = useParticipant();
+function CustomerView({ brandFilter, setBrandFilter }) {
+  const { profile, bookings, responses, invitedSessions, refresh } = useParticipant();
   const toast = useToast();
+  // 公開情報（会一覧・予約人数集計・公開日程調整・回答集計）は Cloud Functions 窓口から取得
+  const [pub, setPub] = useState(null);
+  const [pubLoading, setPubLoading] = useState(true);
+  const [pubError, setPubError] = useState(false);
+  const [pubFlag, setPubFlag] = useState(0);
+  const refreshPublic = () => setPubFlag(x => x + 1);
+  useEffect(() => {
+    let active = true;
+    setPubLoading(true); setPubError(false);
+    fetchPublicData()
+      .then(d => { if (active) { setPub(d); setPubLoading(false); } })
+      .catch(() => { if (active) { setPubError(true); setPubLoading(false); } })
+    return () => { active = false; };
+  }, [pubFlag]);
+
   const [step, setStep] = useState('list');
   const [selected, setSelected] = useState(null);
   const [selectedPollId, setSelectedPollId] = useState(null);
@@ -976,11 +989,12 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
   const myId = profile?.id ?? null;
   const isLoggedIn = !!myId;
 
-  // 自分が見える会だけにフィルタ（クローズドは招待リストに自分が含まれている時のみ）
-  const visibleSessions = sessions
-    .filter(s => s.status === 'open')
-    .map(enrichSession)
-    .filter(s => !s.isClosed || (isLoggedIn && (s.invitedCustomerIds || []).includes(myId)));
+  // 公開会（窓口・closed除外済み）＋ 自分が招待されたクローズド会（getMyData由来）
+  const sessionCounts = pub?.sessionCounts || {};
+  const countOf = (sid) => sessionCounts[sid] ?? 0;
+  const publicSessions = (pub?.sessions || []).map(enrichSession);
+  const invitedEnriched = (invitedSessions || []).map(enrichSession);
+  const visibleSessions = [...publicSessions, ...invitedEnriched];
 
   // 価格レンジの判定
   const matchesPrice = (price) => {
@@ -1047,13 +1061,14 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
   const bookedSessionIds = new Set(myBookings.filter(b => !b.cancelled).map(b => b.sessionId));
   const getMyParticipant = (sid) => myBookings.find(b => b.sessionId === sid) || null;
 
-  // ====== 日程調整：自分宛て（公開 or 自分が招待された招待制）かつ募集中のみ ======
-  const myPolls = (schedulePolls || []).filter(p =>
-    p.status === 'open' && (!p.invitedCustomerIds || (isLoggedIn && p.invitedCustomerIds.includes(myId)))
-  );
+  // ====== 日程調整：公開ポール（窓口由来）。回答済み判定は自分の回答(getMyData)から ======
+  // ※招待限定ポールの参加者表示は getMyData 拡張（要deploy）で別途対応
+  const allPolls = pub?.polls || [];
+  const pollCounts = pub?.pollCounts || {};
+  const myPolls = allPolls.filter(p => p.status === 'open');
   const hasAnswered = (pollId) => (responses || []).some(r => r.pollId === pollId);
   const unansweredPolls = isLoggedIn ? myPolls.filter(p => !hasAnswered(p.id)) : [];
-  const selectedPoll = selectedPollId ? schedulePolls.find(p => p.id === selectedPollId) : null;
+  const selectedPoll = selectedPollId ? allPolls.find(p => p.id === selectedPollId) : null;
 
   // ゲスト出演がある会（フィルタに連動）
   const guestSessions = filtered.filter(s => s.guestName);
@@ -1072,14 +1087,15 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
   if (step === 'pollAnswer' && selectedPoll) return (
     <CustomerPollAnswer
       poll={selectedPoll}
-      pollResponses={pollResponses}
+      pollCounts={pollCounts}
+      responses={responses}
       myId={myId}
       profile={profile}
       onBack={() => { setStep('polls'); setSelectedPollId(null); }}
       onSubmit={async (response) => {
         try {
           await answerPoll({ pollId: response.pollId, answers: response.answers });
-          refresh();
+          refresh(); refreshPublic();
           toast.push('回答を送信しました', 'success');
           setStep('polls'); setSelectedPollId(null);
         } catch (e) {
@@ -1091,16 +1107,27 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
   if (step === 'polls') return (
     <CustomerPollList
       polls={myPolls}
-      pollResponses={pollResponses}
+      responses={responses}
       myId={myId}
       onBack={() => setStep('list')}
       onSelect={(pid) => { setSelectedPollId(pid); setStep('pollAnswer'); }}
     />
   );
   if (step === 'mypage')   return <MyPage onBack={() => setStep('list')} />;
-  if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => { refresh(); setStep('done'); }} profile={profile} />;
+  if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => { refresh(); refreshPublic(); setStep('done'); }} profile={profile} />;
   if (step === 'done' && selected)    return <BookingDone session={selected} onHome={() => { setStep('list'); setSelected(null); }} />;
-  if (step === 'detail' && selected)  return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => { if (!isLoggedIn) { toast.push('予約にはログインが必要です（上部のGoogleログイン）', 'warn'); return; } setStep('confirm'); }} myParticipant={getMyParticipant(selected.id)} cancelBooking={async (pid) => { await cancelReservation({ participantId: pid }); refresh(); }} />;
+  if (step === 'detail' && selected)  return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => { if (!isLoggedIn) { toast.push('予約にはログインが必要です（上部のGoogleログイン）', 'warn'); return; } setStep('confirm'); }} myParticipant={getMyParticipant(selected.id)} cancelBooking={async (pid) => { await cancelReservation({ participantId: pid }); refresh(); refreshPublic(); }} />;
+
+  // 公開情報の取得中／失敗（一覧表示前のガード）
+  if (pubLoading) return <SessionsLoading label="開催情報を読み込んでいます…" sub="Cloud Functions から公開データを取得中" />;
+  if (pubError || !pub) return (
+    <div className="fadeup" style={{ maxWidth: 640, margin: '0 auto', padding: '80px 28px', textAlign: 'center' }}>
+      <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
+      <div className="maru" style={{ fontSize: 16, fontWeight: 700, color: '#2c3140', marginBottom: 6 }}>開催情報を取得できませんでした</div>
+      <div style={{ fontSize: 12, color: '#9499a8', marginBottom: 16 }}>通信状況をご確認のうえ、再読み込みしてください。</div>
+      <button onClick={refreshPublic} style={{ padding: '10px 20px', background: '#2c3140', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700 }}>再読み込み</button>
+    </div>
+  );
 
   return (
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: '32px 28px 80px' }}>
@@ -1319,18 +1346,7 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
         <MonthCalendar
           yearMonth={yearMonth}
           setYearMonth={setYearMonth}
-          sessions={sessions.filter(raw => {
-            // 参加者画面では：自分が見える会 + フィルタ・検索を反映
-            const enriched = enrichSession(raw);
-            if (raw.status !== 'open') return false;
-            if (enriched.isClosed && !(isLoggedIn && (raw.invitedCustomerIds || []).includes(myId))) return false;
-            if (filter !== 'all' && enriched.brand.key !== filter) return false;
-            if (!matchesQuery(enriched)) return false;
-            if (!matchesPrice(enriched.price)) return false;
-            if (!matchesDate(enriched.date)) return false;
-            return true;
-          })}
-          participants={participants}
+          sessions={filtered}
           mode="customer"
           onDayClick={(date, daySessions) => { setPopupDate(date); setPopupSessions(daySessions); }}
         />
@@ -1342,7 +1358,7 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
           <SessionCard
             key={s.id}
             session={s}
-            participants={participants}
+            count={countOf(s.id)}
             isBooked={bookedSessionIds.has(s.id)}
             onClick={() => { setSelected(s); setStep('detail'); }}
             delay={i * 50}
@@ -1379,7 +1395,7 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
         <DaySessionsPopup
           date={popupDate}
           sessions={popupSessions}
-          participants={participants}
+          countOf={countOf}
           accent={filter === 'all' ? '#2c3140' : BRAND[filter].primary}
           onClose={() => setPopupDate(null)}
           onSelect={(s) => { setSelected(s); setStep('detail'); }}
@@ -1392,9 +1408,9 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
 }
 
 // ============ 参加者：日程調整 回答待ちリスト ============
-function CustomerPollList({ polls, pollResponses, myId, onBack, onSelect }) {
+function CustomerPollList({ polls, responses, myId, onBack, onSelect }) {
   const isLoggedIn = !!myId;
-  const answeredOf = (pid) => isLoggedIn && (pollResponses || []).some(r => r.pollId === pid && r.customerId === myId);
+  const answeredOf = (pid) => isLoggedIn && (responses || []).some(r => r.pollId === pid);
 
   return (
     <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
@@ -1449,12 +1465,12 @@ function CustomerPollList({ polls, pollResponses, myId, onBack, onSelect }) {
 }
 
 // ============ 参加者：日程調整 回答画面 ============
-function CustomerPollAnswer({ poll, pollResponses, myId, profile, onBack, onSubmit }) {
-  const toast = useToast();
+function CustomerPollAnswer({ poll, pollCounts, responses, myId, profile, onBack, onSubmit }) {
   const brand = poll.brand ? BRAND[poll.brand] : null;
   const accent = brand ? brand.primary : '#6b5dc7';
   const isLoggedIn = !!myId;
-  const existing = isLoggedIn ? (pollResponses || []).find(r => r.pollId === poll.id && r.customerId === myId) : null;
+  // 自分の既存回答（getMyData由来。プレフィル用）
+  const existing = isLoggedIn ? (responses || []).find(r => r.pollId === poll.id) : null;
   const isPublic = !poll.invitedCustomerIds; // 公開ポールのみ他の人の回答を表示
 
   const [answers, setAnswers] = useState(() => ({ ...(existing?.answers || {}) }));
@@ -1464,13 +1480,10 @@ function CustomerPollAnswer({ poll, pollResponses, myId, profile, onBack, onSubm
   const answeredCount = Object.values(answers).filter(Boolean).length;
   const canSubmit = isLoggedIn && answeredCount >= 1;
 
-  // 他の人の回答集計（自分含む全回答）
-  const allResponses = (pollResponses || []).filter(r => r.pollId === poll.id);
-  const aggOf = (idx) => {
-    const s = { yes: 0, maybe: 0, no: 0 };
-    allResponses.forEach(r => { const a = r.answers?.[idx]; if (a && s[a] != null) s[a]++; });
-    return s;
-  };
+  // 他の人の回答集計（窓口の集計値 pollCounts 由来。個人情報は含まない）
+  const counts = (pollCounts && pollCounts[poll.id]) || [];
+  const aggOf = (idx) => counts[idx] || { yes: 0, maybe: 0, no: 0 };
+  const totalResponses = counts.reduce((m, c) => Math.max(m, (c.yes || 0) + (c.maybe || 0) + (c.no || 0)), 0);
 
   const submit = () => {
     if (!canSubmit) return;
@@ -1559,13 +1572,13 @@ function CustomerPollAnswer({ poll, pollResponses, myId, profile, onBack, onSubm
       </div>
 
       {/* 他の人の回答を見る（公開ポールのみ） */}
-      {isPublic && allResponses.length > 0 && (
+      {isPublic && totalResponses > 0 && (
         <button onClick={() => setShowOthers(v => !v)} style={{
           marginTop: 14, display: 'flex', alignItems: 'center', gap: 6, background: 'transparent', border: 'none',
           cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700, color: accent, padding: '6px 0',
         }}>
           <ChevronRight size={14} style={{ transform: showOthers ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }} />
-          {showOthers ? '他の人の回答を隠す' : `他の人の回答を見る（${allResponses.length}名）`}
+          {showOthers ? '他の人の回答を隠す' : '他の人の回答を見る'}
         </button>
       )}
 
@@ -1919,7 +1932,7 @@ function getCalendarLabel(s) {
 }
 
 // ============ 日別の会一覧ポップアップ ============
-function DaySessionsPopup({ date, sessions, participants, onClose, onSelect, accent = '#2c3140' }) {
+function DaySessionsPopup({ date, sessions, countOf = () => 0, onClose, onSelect, accent = '#2c3140' }) {
   // dateから曜日を出す
   const d = new Date(date);
   const dayLabels = ['日', '月', '火', '水', '木', '金', '土'];
@@ -1936,7 +1949,7 @@ function DaySessionsPopup({ date, sessions, participants, onClose, onSelect, acc
       />
       <div style={{ flex: 1, overflow: 'auto', padding: '12px 0' }}>
         {sessions.map((s, i) => {
-          const cnt = participants.filter(p => p.sessionId === s.id && !p.cancelled).length;
+          const cnt = countOf(s.id);
           const remaining = s.capacity - cnt;
           return (
             <div
@@ -2459,9 +2472,9 @@ function GuestCard({ session, onClick }) {
 }
 
 // ============ セッションカード ============
-function SessionCard({ session, participants, isBooked, onClick, delay }) {
+function SessionCard({ session, count = 0, isBooked, onClick, delay }) {
   const b = session.brand;
-  const cnt = participants.filter(p => p.sessionId === session.id && !p.cancelled).length;
+  const cnt = count;
   const remaining = session.capacity - cnt;
   const isFull = remaining <= 0;
   const isLow = remaining <= 3 && !isFull;
@@ -4349,7 +4362,7 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
         <DaySessionsPopup
           date={popupDate}
           sessions={popupSessions}
-          participants={participants}
+          countOf={(sid) => participants.filter(p => p.sessionId === sid && !p.cancelled).length}
           onClose={() => setPopupDate(null)}
           onSelect={(s) => { setEditingSession(s); }}
         />

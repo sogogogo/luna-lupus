@@ -7,7 +7,7 @@ import {
   List, LayoutGrid, CalendarDays, ListChecks, LogOut,
 } from 'lucide-react';
 import { signIn, signInWithGoogle, signOutUser, onAuthChange } from './lib/auth';
-import { claimAdmin, claimProfile, fetchMyData, bookSession, cancelReservation, reportPayment, updateMyProfile, answerPoll } from './lib/functions'; // claimAdmin は※一時（S4で削除）
+import { claimAdmin, claimProfile, fetchPublicData, fetchMyData, bookSession, cancelReservation, reportPayment, updateMyProfile, answerPoll } from './lib/functions'; // claimAdmin は※一時（S4で削除）
 import {
   subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
   subscribeCustomers, seedCustomers,

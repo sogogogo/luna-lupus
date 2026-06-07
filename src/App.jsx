@@ -312,7 +312,7 @@ function enrichSession(s) {
   };
 }
 
-const fmtYen = (n) => '¥' + n.toLocaleString('ja-JP');
+const fmtYen = (n) => '¥' + (Number(n) || 0).toLocaleString('ja-JP'); // null/undefined でも落ちない
 // "2026-05-15" → "5/15"  /  曜日付き: fmtMD(d, '金') → "5/15（金）"
 const fmtMD = (dateStr, day) => {
   if (!dateStr || typeof dateStr !== 'string') return '';

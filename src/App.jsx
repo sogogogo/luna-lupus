@@ -1068,7 +1068,7 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
               color: '#2c3140',
             }}>
               ウソをつくゲームで<br />
-              <span style={{ color: heroBrand.primary, transition: 'color 0.4s' }}>ホントの友達</span>が出来る。
+              <span style={{ color: heroBrand.primary, transition: 'color 0.4s' }}>本当の友達</span>ができる。
             </h1>
             <p style={{ fontSize: 14, color: '#6b6e7a', marginTop: 14, lineHeight: 1.9, maxWidth: 480 }}>
               {filter === 'all' ? <>初心者から上級者まで、誰でも楽しめる人狼会を毎週開催中。<br />お気に入りの会を見つけて、新しい仲間に出会いましょう。</>

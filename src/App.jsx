@@ -728,7 +728,7 @@ function AppInner() {
               ? <AdminNoPermission />
               : sessionsLoading
               ? <SessionsLoading />
-              : <AdminView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />)
+              : <AdminView sessions={sessions} participants={participants} updateParticipant={updateParticipant} addParticipant={addParticipant} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} deleteSchedulePoll={deleteSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />)
           : <CustomerView brandFilter={brandFilter} setBrandFilter={setBrandFilter} />
         }
       </main>
@@ -3308,7 +3308,7 @@ function AdminNoPermission() {
   );
 }
 
-function AdminView({ sessions, participants, updateParticipant, addParticipant, updateSession, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, announceHistory, addAnnounce }) {
+function AdminView({ sessions, participants, updateParticipant, addParticipant, updateSession, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, deleteSchedulePoll, announceHistory, addAnnounce }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [selectedSession, setSelectedSession] = useState(null);
@@ -3340,7 +3340,7 @@ function AdminView({ sessions, participants, updateParticipant, addParticipant, 
       </div>
 
       {tab === 'dashboard' && <Dashboard sessions={sessions} participants={participants} />}
-      {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} addSession={addSession} addParticipant={addParticipant} addAnnounce={addAnnounce} />}
+      {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} deleteSchedulePoll={deleteSchedulePoll} addSession={addSession} addParticipant={addParticipant} addAnnounce={addAnnounce} />}
       {tab === 'sessions' && <SessionsAdmin sessions={sessions} participants={participants} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} />}
       {tab === 'payments' && <PaymentsAdmin sessions={sessions} participants={participants} updateParticipant={updateParticipant} />}
       {tab === 'roles' && (selectedSession
@@ -3449,11 +3449,12 @@ function PollCard({ poll, pollResponses, onClick }) {
   );
 }
 
-function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, addSession, addParticipant, addAnnounce }) {
+function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, deleteSchedulePoll, addSession, addParticipant, addAnnounce }) {
   const toast = useToast();
   const [showClosed, setShowClosed] = useState(false);
   const [selected, setSelected] = useState(null);
   const [editing, setEditing] = useState(null); // { mode: 'create' } | { mode: 'edit', poll }
+  const [deletingPoll, setDeletingPoll] = useState(null); // 削除確認対象
 
   // 候補日を確定 → 会作成・◯回答者を参加者登録・ポール更新・告知履歴追記
   const confirmPoll = (poll, colIdx, opts = {}) => {
@@ -3532,11 +3533,30 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
     />
   );
 
+  // 削除確認ダイアログ（日程調整＋紐づく回答を削除）
+  const deleteModal = deletingPoll && (
+    <ConfirmModal
+      icon={<AlertTriangle size={26} />}
+      title="この日程調整を削除しますか？"
+      body={`「${deletingPoll.title}」と、紐づく全ての回答を削除します。\nこの操作は取り消せません。`}
+      confirmLabel="削除する"
+      confirmColor="#d44a4a"
+      onConfirm={() => {
+        deleteSchedulePoll(deletingPoll.id);
+        toast.push('日程調整を削除しました', 'success');
+        setDeletingPoll(null);
+        setSelected(null);
+      }}
+      onClose={() => setDeletingPoll(null)}
+    />
+  );
+
   if (selectedPoll) {
     return (
       <>
-        <PollAggregateView poll={selectedPoll} pollResponses={pollResponses} onBack={() => setSelected(null)} onEdit={() => setEditing({ mode: 'edit', poll: selectedPoll })} onConfirm={(colIdx, opts) => confirmPoll(selectedPoll, colIdx, opts)} />
+        <PollAggregateView poll={selectedPoll} pollResponses={pollResponses} onBack={() => setSelected(null)} onEdit={() => setEditing({ mode: 'edit', poll: selectedPoll })} onConfirm={(colIdx, opts) => confirmPoll(selectedPoll, colIdx, opts)} onDelete={() => setDeletingPoll(selectedPoll)} />
         {editModal}
+        {deleteModal}
       </>
     );
   }
@@ -3844,7 +3864,7 @@ const ANSWER_STYLE = {
   none:  { mark: '─', color: '#b0ada5', bg: '#f5f3ee', label: '未回答' },
 };
 
-function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm }) {
+function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm, onDelete }) {
   const customers = useCustomers();
   const [confirmingIndex, setConfirmingIndex] = useState(null);
   const brand = BRAND[poll.brand];
@@ -3911,6 +3931,13 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm }) {
                 background: '#fff', border: `1.5px solid ${accent}`, color: accent,
                 borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
               }}>編集</button>
+            )}
+            {onDelete && (
+              <button onClick={onDelete} style={{
+                display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px',
+                background: '#fff', border: '1.5px solid #d44a4a', color: '#d44a4a',
+                borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+              }}>削除</button>
             )}
           </div>
         </div>

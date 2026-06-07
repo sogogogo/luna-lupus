@@ -231,6 +231,71 @@ exports.claimProfile = onCall(async (request) => {
   }
 });
 
+// uid から自分の顧客レコードを解決（authUid 一致）。見つからなければ null
+async function resolveMyCustomer(uid) {
+  const snap = await db.collection('customers').get();
+  const doc = snap.docs.find((d) => d.data().authUid === uid);
+  return doc ? doc.data() : null;
+}
+// 自分の予約に見せる会情報（公開フィールド＋自分は参加者なので meetingUrl も含める）
+function toMyBookingSession(s) {
+  return { ...toPublicSession(s), meetingUrl: s.meetingUrl || null };
+}
+
+// =====================================================================
+// 参加者: 自分のデータのみ取得（マイページ・予約済み・回答済み・招待表示の元）
+//   他人のデータは一切返さない。プロフィールは最小開示。
+// =====================================================================
+exports.getMyData = onCall(async (request) => {
+  try {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'ログインしてください。');
+    const me = await resolveMyCustomer(request.auth.uid);
+    if (!me) return { linked: false };
+    const myId = me.id;
+
+    const [partSnap, sessSnap, resSnap] = await Promise.all([
+      db.collection('participants').where('customerId', '==', myId).get(),
+      db.collection('sessions').get(),
+      db.collection('pollResponses').where('customerId', '==', myId).get(),
+    ]);
+
+    const sessionsById = {};
+    sessSnap.forEach((d) => { const s = d.data(); sessionsById[s.id] = s; });
+
+    const bookings = partSnap.docs.map((d) => {
+      const p = d.data();
+      const s = sessionsById[p.sessionId];
+      return {
+        id: p.id,
+        sessionId: p.sessionId,
+        paid: p.paid === true,
+        cancelled: p.cancelled === true,
+        role: p.role || null,
+        session: s ? toMyBookingSession(s) : null,
+      };
+    });
+
+    const responses = resSnap.docs.map((d) => {
+      const r = d.data();
+      return { id: r.id, pollId: r.pollId, answers: r.answers || {} };
+    });
+
+    const invitedSessions = [];
+    sessSnap.forEach((d) => {
+      const s = d.data();
+      if (s.status === 'open' && Array.isArray(s.invitedCustomerIds) && s.invitedCustomerIds.includes(myId)) {
+        invitedSessions.push(toPublicSession(s));
+      }
+    });
+
+    return { linked: true, profile: toSafeProfile(me), bookings, responses, invitedSessions };
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    logger.error('getMyData failed', err);
+    throw new HttpsError('internal', 'マイデータの取得に失敗しました。');
+  }
+});
+
 // =====================================================================
 // 窓口1: 公開情報の読み取り
 // =====================================================================
@@ -294,19 +359,19 @@ exports.getPublicData = onCall(async () => {
 });
 
 // =====================================================================
-// 窓口2: 予約（定員チェックはサーバー側でトランザクション内に行う）
+// 窓口2: 予約（要ログイン。本人として予約。定員チェックはトランザクション内）
 // =====================================================================
 exports.createReservation = onCall(async (request) => {
   try {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'ログインしてください。');
     const data = request.data || {};
     const sessionIdRaw = data.sessionId;
     if (sessionIdRaw === undefined || sessionIdRaw === null || String(sessionIdRaw).length === 0) {
       throw new HttpsError('invalid-argument', '会が指定されていません。');
     }
-    const name = requireString(data.name, 'お名前', { max: 50 });
-    const handle = optionalString(data.handle, 'ハンドル名', { max: 50 });
     const note = optionalString(data.note, '伝言', { max: 500 });
-    const idKey = identityKey(name, handle);
+    const me = await resolveMyCustomer(request.auth.uid);
+    if (!me) throw new HttpsError('failed-precondition', 'プロフィール未設定です。Xハンドルを設定してください。');
 
     const sessionRef = db.collection('sessions').doc(String(sessionIdRaw));
 
@@ -314,7 +379,11 @@ exports.createReservation = onCall(async (request) => {
       const sessSnap = await tx.get(sessionRef);
       if (!sessSnap.exists) throw new HttpsError('not-found', '指定された会が見つかりません。');
       const s = sessSnap.data();
-      if (!isPublicSession(s)) throw new HttpsError('failed-precondition', 'この会は現在予約を受け付けていません。');
+      // 公開会、または自分が招待されたクローズド会のみ予約可
+      const invited = Array.isArray(s.invitedCustomerIds) && s.invitedCustomerIds.includes(me.id);
+      if (s.status !== 'open' || !(isPublicSession(s) || invited)) {
+        throw new HttpsError('failed-precondition', 'この会は現在予約を受け付けていません。');
+      }
 
       const capacity = (PLAN_META[s.plan] || {}).capacity ?? 0;
       const partSnap = await tx.get(db.collection('participants').where('sessionId', '==', s.id));
@@ -324,7 +393,7 @@ exports.createReservation = onCall(async (request) => {
         const p = d.data();
         if (p.cancelled === true) return;
         active += 1;
-        if (identityKey(p.name, p.handle) === idKey) dup = true;
+        if (p.customerId === me.id) dup = true;   // 本人での二重予約防止
       });
       if (dup) throw new HttpsError('already-exists', 'この会はすでに予約済みです。');
       if (capacity > 0 && active >= capacity) throw new HttpsError('resource-exhausted', '申し訳ありません。この会は定員に達しています。');
@@ -333,16 +402,16 @@ exports.createReservation = onCall(async (request) => {
       const participant = {
         id: ref.id,
         sessionId: s.id,
-        customerId: null,           // 匿名予約
-        name,
-        handle: handle || null,
-        paid: false,                // 入金は運営者が確認（既存フローに合流）
+        customerId: me.id,          // 本人
+        name: me.name,              // 氏名/ハンドルは顧客レコードから（なりすまし防止）
+        handle: me.handle || null,
+        paid: false,                // 入金は運営者が確認
         paidAt: null,
         cancelled: false,
         refunded: false,
         role: null,
         note: note || null,
-        createdVia: 'public',
+        createdVia: 'self',
         createdAt: nowStamp(),
       };
       tx.set(ref, participant);
@@ -358,18 +427,46 @@ exports.createReservation = onCall(async (request) => {
 });
 
 // =====================================================================
-// 窓口3: 日程調整に回答（同じ人の再回答は上書き）
+// 予約のキャンセル（要ログイン・自分の予約のみ）
+// =====================================================================
+exports.cancelReservation = onCall(async (request) => {
+  try {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'ログインしてください。');
+    const participantId = (request.data && request.data.participantId) || '';
+    if (!participantId) throw new HttpsError('invalid-argument', '予約が指定されていません。');
+    const me = await resolveMyCustomer(request.auth.uid);
+    if (!me) throw new HttpsError('failed-precondition', 'プロフィール未設定です。');
+
+    const ref = db.collection('participants').doc(String(participantId));
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new HttpsError('not-found', '予約が見つかりません。');
+      const p = snap.data();
+      if (p.customerId !== me.id) throw new HttpsError('permission-denied', '自分の予約のみキャンセルできます。');
+      if (p.cancelled === true) return;
+      tx.update(ref, { cancelled: true, cancelledAt: nowStamp() });
+    });
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    logger.error('cancelReservation failed', err);
+    throw new HttpsError('internal', 'キャンセル処理でエラーが発生しました。');
+  }
+});
+
+// =====================================================================
+// 窓口3: 日程調整に回答（要ログイン。本人として upsert）
 // =====================================================================
 exports.submitPollResponse = onCall(async (request) => {
   try {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'ログインしてください。');
     const data = request.data || {};
     const pollIdRaw = data.pollId;
     if (pollIdRaw === undefined || pollIdRaw === null || String(pollIdRaw).length === 0) {
       throw new HttpsError('invalid-argument', '日程調整が指定されていません。');
     }
-    const name = requireString(data.name, 'お名前', { max: 50 });
-    const handle = optionalString(data.handle, 'ハンドル名', { max: 50 });
-    const idKey = identityKey(name, handle);
+    const me = await resolveMyCustomer(request.auth.uid);
+    if (!me) throw new HttpsError('failed-precondition', 'プロフィール未設定です。Xハンドルを設定してください。');
 
     const pollRef = db.collection('schedulePolls').doc(String(pollIdRaw));
 
@@ -377,22 +474,23 @@ exports.submitPollResponse = onCall(async (request) => {
       const pollSnap = await tx.get(pollRef);
       if (!pollSnap.exists) throw new HttpsError('not-found', '指定された日程調整が見つかりません。');
       const poll = pollSnap.data();
-      if (!isPublicPoll(poll)) throw new HttpsError('failed-precondition', 'この日程調整は現在回答を受け付けていません。');
+      // 公開ポール、または自分が招待されたポールのみ回答可
+      const invited = Array.isArray(poll.invitedCustomerIds) && poll.invitedCustomerIds.includes(me.id);
+      if (poll.status !== 'open' || !(isPublicPoll(poll) || invited)) {
+        throw new HttpsError('failed-precondition', 'この日程調整は現在回答を受け付けていません。');
+      }
 
       const candidateCount = Array.isArray(poll.candidateDates) ? poll.candidateDates.length : 0;
       const answers = validateAnswers(data.answers, candidateCount);
 
-      // 同一人物の既存回答を探して上書き（無ければ新規）
+      // 本人の既存回答を探して上書き（無ければ新規）
       const existingSnap = await tx.get(db.collection('pollResponses').where('pollId', '==', poll.id));
       let targetRef = null;
       let existingComment = '';
       existingSnap.forEach((d) => {
         const r = d.data();
         if (targetRef) return;
-        if (identityKey(r.name, r.handle) === idKey) {
-          targetRef = d.ref;
-          existingComment = r.comment || '';
-        }
+        if (r.customerId === me.id) { targetRef = d.ref; existingComment = r.comment || ''; }
       });
       const created = !targetRef;
       if (!targetRef) targetRef = db.collection('pollResponses').doc();
@@ -400,9 +498,9 @@ exports.submitPollResponse = onCall(async (request) => {
       const response = {
         id: targetRef.id,
         pollId: poll.id,
-        customerId: null,           // 匿名回答
-        name,
-        handle: handle || null,
+        customerId: me.id,          // 本人
+        name: me.name,
+        handle: me.handle || null,
         answers,
         comment: existingComment,
         respondedAt: nowStamp(),

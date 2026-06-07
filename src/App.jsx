@@ -7,6 +7,7 @@ import {
   List, LayoutGrid, CalendarDays, ListChecks, LogOut,
 } from 'lucide-react';
 import { signIn, signOutUser, onAuthChange } from './lib/auth';
+import { claimAdmin } from './lib/functions'; // ※一時: 運営者クレーム付与（S4で削除）
 import {
   subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
   subscribeCustomers, seedCustomers,
@@ -379,20 +380,36 @@ function ToastProvider({ children }) {
 }
 
 // =====================================================================
-// 認証（Firebase Auth）— 運営者ログイン状態を全画面に供給
+// 認証（Firebase Auth）— ログイン状態と運営者判定を全画面に供給
+//   user: 現在のユーザー（運営者=メール/PW, 参加者=Google）
+//   isAdmin: カスタムクレーム admin:true を持つ運営者か
 // =====================================================================
-const AuthContext = createContext({ user: null, loading: true });
+const AuthContext = createContext({ user: null, isAdmin: false, loading: true });
 const useAuth = () => useContext(AuthContext);
 
 function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     // 起動時に復元（リロードしてもログイン状態が保たれる）
-    const unsub = onAuthChange((u) => { setUser(u); setLoading(false); });
+    const unsub = onAuthChange(async (u) => {
+      setUser(u);
+      if (u) {
+        try {
+          const t = await u.getIdTokenResult();
+          setIsAdmin(t.claims.admin === true);
+        } catch {
+          setIsAdmin(false);
+        }
+      } else {
+        setIsAdmin(false);
+      }
+      setLoading(false);
+    });
     return () => unsub();
   }, []);
-  return <AuthContext.Provider value={{ user, loading }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, isAdmin, loading }}>{children}</AuthContext.Provider>;
 }
 
 // =====================================================================
@@ -3012,6 +3029,35 @@ function Stat({ label, value, unit, small }) {
 // =====================================================================
 // 管理者側
 // =====================================================================
+// ※一時: 運営者クレーム(admin:true)が未付与のとき、付与を促すバナー。S4で削除する。
+function AdminClaimBanner() {
+  const { isAdmin } = useAuth();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  if (isAdmin) return null;
+  const run = async () => {
+    const secret = window.prompt('運営者権限を取得します。設定したシークレット（ADMIN_CLAIM_SECRET）を入力してください。');
+    if (!secret) return;
+    setBusy(true);
+    try {
+      await claimAdmin(secret);
+      toast.push('運営者権限を付与しました。反映のため一度ログアウト→再ログインしてください。', 'success');
+    } catch (e) {
+      toast.push(`付与に失敗: ${e.code || ''} ${e.message || ''}`, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div style={{ marginBottom: 16, padding: '12px 16px', background: '#fffbe8', border: '1px dashed #c9962a', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 12, color: '#a47b1f', fontWeight: 700 }}>【一時】このアカウントには運営者権限(admin)が未付与です。</span>
+      <button onClick={run} disabled={busy} style={{ padding: '7px 14px', background: '#c9962a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700 }}>
+        {busy ? '付与中…' : '運営者権限を取得'}
+      </button>
+    </div>
+  );
+}
+
 function AdminView({ sessions, participants, updateParticipant, addParticipant, updateSession, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, announceHistory, addAnnounce }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -3019,6 +3065,7 @@ function AdminView({ sessions, participants, updateParticipant, addParticipant, 
 
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 80px' }}>
+      <AdminClaimBanner />{/* ※一時: 運営者クレーム未付与のとき表示。S4で削除 */}
       <div style={{ display: 'flex', gap: 2, marginBottom: 24, borderBottom: '1px solid #e8e5dd', overflowX: 'auto' }}>
         {[
           { id: 'dashboard', label: 'ダッシュボード', icon: TrendingUp },

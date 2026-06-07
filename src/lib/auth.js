@@ -1,18 +1,28 @@
 // =====================================================================
-// 認証ヘルパー（Firebase Auth・メール/パスワード）
+// 認証ヘルパー（Firebase Auth）
 // =====================================================================
-// 運営者ログイン用。設定はソース直書きせず firebase.js（環境変数）の auth を使う。
+// 運営者: メール/パスワード（＋カスタムクレーム admin:true）
+// 参加者: Google ログイン
+// 設定はソース直書きせず firebase.js（環境変数）の auth を使う。
 
 import { auth } from './firebase';
 import {
   signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
   signOut,
   onAuthStateChanged,
 } from 'firebase/auth';
 
-// メール/パスワードでログイン
+// 運営者: メール/パスワードでログイン
 export function signIn(email, password) {
   return signInWithEmailAndPassword(auth, email, password);
+}
+
+// 参加者: Google でログイン
+export function signInWithGoogle() {
+  const provider = new GoogleAuthProvider();
+  return signInWithPopup(auth, provider);
 }
 
 // ログアウト

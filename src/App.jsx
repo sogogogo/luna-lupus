@@ -420,15 +420,18 @@ const CustomersContext = createContext([]);
 const useCustomers = () => useContext(CustomersContext);
 
 function CustomersProvider({ children }) {
+  const { isAdmin } = useAuth();
   const [customers, setCustomers] = useState([]);
   const toast = useToast();
   useEffect(() => {
+    // 顧客データの購読は運営者のみ（参加者は customers を直接読まない）
+    if (!isAdmin) { setCustomers([]); return; }
     const unsub = subscribeCustomers(
       rows => setCustomers(rows),
       () => toast.push('顧客データの読み込みに失敗しました', 'error'),
     );
     return () => unsub();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
   return <CustomersContext.Provider value={customers}>{children}</CustomersContext.Provider>;
 }
 
@@ -546,8 +549,11 @@ function AppInner() {
   const [announceHistory, setAnnounceHistory] = useState([]); // Firestore から読み込む（DB移行: announcements）
   const [brandFilter, setBrandFilter] = useState('all');  // 参加者画面のブランドフィルタ（全画面背景にも反映）
 
-  // Firestore の各コレクションをリアルタイム購読（書き込み反映も自動）
+  // Firestore のリアルタイム購読は「運営者（isAdmin）」のときだけ。
+  // 参加者・未ログインは購読を一切開かず、すべて Cloud Functions 窓口経由（S3-E3）。
   useEffect(() => {
+    if (!isAdmin) return; // 参加者・未ログインは直接購読しない
+    setSessionsLoading(true);
     const unsubS = subscribeSessions(
       rows => { setSessions(rows); setSessionsLoading(false); },
       () => { setSessionsLoading(false); toast.push('会データの読み込みに失敗しました', 'error'); },
@@ -569,7 +575,7 @@ function AppInner() {
       () => toast.push('告知履歴の読み込みに失敗しました', 'error'),
     );
     return () => { unsubS(); unsubP(); unsubPoll(); unsubRes(); unsubAnn(); };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // participants のミューテータは Firestore へ書き込み、画面反映は onSnapshot に任せる
   const updateParticipant = (id, patch) => {

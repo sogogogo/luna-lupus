@@ -684,6 +684,10 @@ function AppInner() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* 参加者/管理者トグルは運営者(isAdmin)ログイン時のみ表示。
+              参加者・未ログイン・Google参加者には管理画面の存在自体を見せない。
+              運営者は参加者画面フッターの「運営者ログイン」からログイン → isAdmin判明でトグル出現。 */}
+          {isAdmin && (
           <div style={{
             display: 'flex',
             background: '#f0eee8',
@@ -702,6 +706,7 @@ function AppInner() {
               </button>
             ))}
           </div>
+          )}
           {/* ログアウト（管理者ログイン中のみ） */}
           {view === 'admin' && user && (
             <button onClick={async () => { await signOutUser(); toast.push('ログアウトしました', 'info'); }} style={{
@@ -721,15 +726,32 @@ function AppInner() {
           ? (authLoading
               ? <SessionsLoading label="認証情報を確認しています…" sub="ログイン状態を確認中" />
               : !user
-              ? <LoginScreen />
+              ? <LoginScreen onBack={() => setView('customer')} />
               : !isAdmin
-              ? <AdminNoPermission />
+              ? <AdminNoPermission onBack={() => setView('customer')} />
               : sessionsLoading
               ? <SessionsLoading />
               : <AdminView sessions={sessions} participants={participants} updateParticipant={updateParticipant} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} deleteSchedulePoll={deleteSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />)
           : <CustomerView brandFilter={brandFilter} setBrandFilter={setBrandFilter} />
         }
       </main>
+
+      {/* 控えめな運営者ログイン入口（参加者画面・非運営者のみ）。
+          ここから view='admin' → 未ログインなら LoginScreen が出る。運営者の管理画面への唯一の動線。 */}
+      {view === 'customer' && !isAdmin && (
+        <footer style={{
+          maxWidth: 1080, margin: '0 auto', padding: '0 28px 48px',
+          textAlign: 'center',
+        }}>
+          <button onClick={() => setView('admin')} style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontFamily: 'inherit', fontSize: 11, color: '#b0ada5', fontWeight: 600,
+            display: 'inline-flex', alignItems: 'center', gap: 5, padding: 6,
+          }} title="運営者の方はこちらからログイン">
+            <Lock size={11} /> 運営者ログイン
+          </button>
+        </footer>
+      )}
     </div>
   );
 }
@@ -767,7 +789,7 @@ function authErrorMessage(err) {
 }
 
 // ============ 運営者ログイン画面 ============
-function LoginScreen() {
+function LoginScreen({ onBack }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -851,8 +873,17 @@ function LoginScreen() {
       </form>
 
       <p style={{ textAlign: 'center', fontSize: 11, color: '#b0ada5', marginTop: 16 }}>
-        参加者ページは上部の「参加者」タブから、ログインなしでご利用いただけます。
+        参加者の方はログイン不要です。下のボタンから参加者ページへお戻りください。
       </p>
+      {onBack && (
+        <div style={{ textAlign: 'center', marginTop: 10 }}>
+          <button onClick={onBack} style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontFamily: 'inherit', fontSize: 12, color: '#6b6e7a', fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', gap: 5, padding: 6,
+          }}><ChevronLeft size={14} /> 参加者ページに戻る</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -3287,7 +3318,7 @@ function Stat({ label, value, unit, small }) {
 // 管理者側
 // =====================================================================
 // 管理画面に来たが運営者権限(admin)が無いユーザー向けの画面
-function AdminNoPermission() {
+function AdminNoPermission({ onBack }) {
   const toast = useToast();
   return (
     <div className="fadeup" style={{ maxWidth: 460, margin: '0 auto', padding: '70px 28px 80px', textAlign: 'center' }}>
@@ -3296,12 +3327,21 @@ function AdminNoPermission() {
       </div>
       <h2 className="maru" style={{ fontSize: 20, fontWeight: 900, color: '#2c3140', margin: '0 0 6px' }}>運営者権限がありません</h2>
       <p style={{ fontSize: 12, color: '#9499a8', lineHeight: 1.8, marginBottom: 20 }}>
-        この画面は運営者専用です。<br />参加者の方は上部の「参加者」タブからご利用ください。
+        この画面は運営者専用です。<br />参加者の方は下のボタンから参加者ページへお戻りください。
       </p>
-      <button onClick={async () => { await signOutUser(); toast.push('ログアウトしました', 'info'); }} style={{
-        padding: '10px 18px', background: '#fff', border: '1px solid #d4d0c8', color: '#2c3140',
-        borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
-      }}>ログアウト</button>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+        {onBack && (
+          <button onClick={onBack} style={{
+            padding: '10px 18px', background: '#2c3140', border: 'none', color: '#fff',
+            borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+          }}><ChevronLeft size={14} /> 参加者ページに戻る</button>
+        )}
+        <button onClick={async () => { await signOutUser(); toast.push('ログアウトしました', 'info'); }} style={{
+          padding: '10px 18px', background: '#fff', border: '1px solid #d4d0c8', color: '#2c3140',
+          borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+        }}>ログアウト</button>
+      </div>
     </div>
   );
 }

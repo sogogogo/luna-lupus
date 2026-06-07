@@ -7,7 +7,7 @@ import {
   List, LayoutGrid, CalendarDays, ListChecks, LogOut,
 } from 'lucide-react';
 import { signIn, signInWithGoogle, signOutUser, onAuthChange } from './lib/auth';
-import { claimAdmin, claimProfile, fetchMyData, bookSession, cancelReservation, answerPoll } from './lib/functions'; // claimAdmin は※一時（S4で削除）
+import { claimAdmin, claimProfile, fetchMyData, bookSession, cancelReservation, reportPayment, answerPoll } from './lib/functions'; // claimAdmin は※一時（S4で削除）
 import {
   subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
   subscribeCustomers, seedCustomers,
@@ -1116,7 +1116,7 @@ function CustomerView({ brandFilter, setBrandFilter }) {
   if (step === 'mypage')   return <MyPage onBack={() => setStep('list')} />;
   if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => { refresh(); refreshPublic(); setStep('done'); }} profile={profile} />;
   if (step === 'done' && selected)    return <BookingDone session={selected} onHome={() => { setStep('list'); setSelected(null); }} />;
-  if (step === 'detail' && selected)  return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => { if (!isLoggedIn) { toast.push('予約にはログインが必要です（上部のGoogleログイン）', 'warn'); return; } setStep('confirm'); }} myParticipant={getMyParticipant(selected.id)} cancelBooking={async (pid) => { await cancelReservation({ participantId: pid }); refresh(); refreshPublic(); }} />;
+  if (step === 'detail' && selected)  return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => { if (!isLoggedIn) { toast.push('予約にはログインが必要です（上部のGoogleログイン）', 'warn'); return; } setStep('confirm'); }} myParticipant={getMyParticipant(selected.id)} cancelBooking={async (pid) => { await cancelReservation({ participantId: pid }); refresh(); refreshPublic(); }} reportBooking={async (pid) => { await reportPayment({ participantId: pid }); refresh(); }} />;
 
   // 公開情報の取得中／失敗（一覧表示前のガード）
   if (pubLoading) return <SessionsLoading label="開催情報を読み込んでいます…" sub="Cloud Functions から公開データを取得中" />;
@@ -2646,12 +2646,18 @@ function AnnouncementModal({ onClose }) {
   );
 }
 
+// 支払いステータスの正規化（古いデータ=paidのみ にも対応）
+function paymentStatusOf(p) {
+  if (!p) return 'unpaid';
+  return p.paymentStatus || (p.paid ? 'confirmed' : 'unpaid');
+}
+
 // ============ セッション詳細 ============
-function SessionDetail({ session, onBack, onBook, myParticipant, cancelBooking }) {
+function SessionDetail({ session, onBack, onBook, myParticipant, cancelBooking, reportBooking }) {
   const b = session.brand;
   const isAlreadyBooked = myParticipant && !myParticipant.cancelled;
   const role = myParticipant?.role;
-  const isPaid = myParticipant?.paid;
+  const payStatus = paymentStatusOf(myParticipant);
 
   return (
     <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
@@ -2757,7 +2763,7 @@ function SessionDetail({ session, onBack, onBook, myParticipant, cancelBooking }
 
               <RoleCard role={role} sessionDate={session.date} accent={b.primary} />
 
-              <PaymentStatus paid={isPaid} paidAt={myParticipant.paidAt} accent={b.primary} />
+              <PaymentStatus status={payStatus} price={session.price} accent={b.primary} onReport={() => reportBooking(myParticipant.id)} />
 
               <CancelSection session={session} myParticipant={myParticipant} cancelBooking={cancelBooking} />
             </>
@@ -2806,26 +2812,62 @@ function Detail({ icon, label, value }) {
   );
 }
 
-function PaymentStatus({ paid, paidAt, accent }) {
-  return (
-    <div style={{
-      padding: '12px 16px', marginBottom: 12, borderRadius: 10,
-      background: paid ? '#e6f3eb' : '#fce8e0',
-      border: `1px solid ${paid ? '#b8d9c4' : '#f5c5b6'}`,
-      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {paid ? <CheckCircle2 size={16} color="#3a8c5b" /> : <AlertCircle size={16} color="#d97757" />}
+// 支払い状態（3段階）＋ 未送金時は PayPay 送金導線（QRは後日設定・プレースホルダ）
+function PaymentStatus({ status, price, accent, onReport }) {
+  const [reporting, setReporting] = useState(false);
+  const toast = useToast();
+
+  if (status === 'confirmed') {
+    return (
+      <div style={{ padding: '12px 16px', marginBottom: 12, borderRadius: 10, background: '#e6f3eb', border: '1px solid #b8d9c4', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <CheckCircle2 size={16} color="#3a8c5b" />
+        <div style={{ fontSize: 12, color: '#3a8c5b', fontWeight: 700 }}>入金確認済み</div>
+      </div>
+    );
+  }
+  if (status === 'reported') {
+    return (
+      <div style={{ padding: '12px 16px', marginBottom: 12, borderRadius: 10, background: '#fef7e8', border: '1px solid #f5d97a', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Clock size={16} color="#c9962a" />
         <div>
-          <div style={{ fontSize: 12, color: paid ? '#3a8c5b' : '#d97757', fontWeight: 700 }}>
-            {paid ? '支払い済み' : '入金確認待ち'}
-          </div>
-          {paid && paidAt && <div className="num" style={{ fontSize: 10, color: '#6b6e7a' }}>{paidAt}</div>}
+          <div style={{ fontSize: 12, color: '#c9962a', fontWeight: 700 }}>送金済み（運営の確認待ち）</div>
+          <div style={{ fontSize: 10, color: '#9499a8', marginTop: 2 }}>入金が確認されると「入金確認済み」になります</div>
         </div>
       </div>
-      {!paid && (
-        <span style={{ fontSize: 10, color: '#9499a8' }}>運営の確認後に反映されます</span>
-      )}
+    );
+  }
+  // unpaid
+  const handleReport = async () => {
+    if (reporting) return;
+    setReporting(true);
+    try { await onReport(); toast.push('送金を申告しました。運営の確認をお待ちください。', 'success'); }
+    catch (e) { toast.push(e.message || '申告に失敗しました', 'error'); setReporting(false); }
+  };
+  return (
+    <div style={{ padding: 16, marginBottom: 12, borderRadius: 10, background: '#fff', border: '1px solid #f5c5b6' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <AlertCircle size={16} color="#d97757" />
+        <div style={{ fontSize: 12, color: '#d97757', fontWeight: 700 }}>未送金</div>
+      </div>
+      {/* PayPay 送金先 QR（プレースホルダ。運営が後で画像を設定） */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12 }}>
+        <div style={{ width: 110, height: 110, flexShrink: 0, background: '#f0ede5', border: '1px dashed #c9c4ba', borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: '#9499a8' }}>
+          <QrCode size={36} strokeWidth={1} />
+          <span style={{ fontSize: 9 }}>QR準備中</span>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: '#9499a8', marginBottom: 2 }}>PayPay 送金額</div>
+          <div className="num" style={{ fontSize: 22, fontWeight: 700, color: '#2c3140' }}>{fmtYen(price)}</div>
+          <div style={{ fontSize: 10, color: '#9499a8', marginTop: 4, lineHeight: 1.6 }}>上記QRで送金後、下のボタンで申告してください。</div>
+        </div>
+      </div>
+      <button onClick={handleReport} disabled={reporting} style={{
+        width: '100%', padding: 11, background: reporting ? '#e0ddd6' : '#ff0033', color: '#fff',
+        border: 'none', borderRadius: 8, cursor: reporting ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+      }}>
+        <Wallet size={13} /> {reporting ? '申告中…' : 'PayPayで送金しました（申告）'}
+      </button>
     </div>
   );
 }
@@ -3160,11 +3202,13 @@ function MyPage({ onBack }) {
                 <div style={{ fontSize: 10, color: s.brand.primary, fontWeight: 700 }}>{s.brand.name}</div>
                 <div className="maru" style={{ fontSize: 12, fontWeight: 700, color: '#2c3140' }}>{s.title}</div>
               </div>
-              <span style={{
-                padding: '2px 8px', fontSize: 9, fontWeight: 700, borderRadius: 999,
-                background: b.paid ? '#e6f3eb' : '#fce8e0',
-                color: b.paid ? '#3a8c5b' : '#d97757',
-              }}>● {b.paid ? '支払済' : '未払い'}</span>
+              {(() => {
+                const st = paymentStatusOf(b);
+                const m = st === 'confirmed' ? { bg: '#e6f3eb', c: '#3a8c5b', l: '入金確認済' }
+                  : st === 'reported' ? { bg: '#fef7e8', c: '#c9962a', l: '送金申告済' }
+                  : { bg: '#fce8e0', c: '#d97757', l: '未送金' };
+                return <span style={{ padding: '2px 8px', fontSize: 9, fontWeight: 700, borderRadius: 999, background: m.bg, color: m.c }}>● {m.l}</span>;
+              })()}
               {s.isOnline && s.meetingUrl && (
                 <a href={s.meetingUrl} target="_blank" rel="noreferrer" style={{
                   padding: '6px 10px', background: '#e6f1f9', border: '1px solid #b8d6ec',
@@ -4833,18 +4877,20 @@ function ParticipantRow({ idx, participant, session, updateParticipant }) {
   const toast = useToast();
   const [confirmKind, setConfirmKind] = useState(null); // 'paid' | 'refund' | 'remind'
 
+  const ps = paymentStatusOf(p); // 'unpaid' | 'reported' | 'confirmed'
   let statusColor, statusLabel, statusIcon;
   if (p.cancelled && p.refunded) { statusColor = '#9499a8'; statusLabel = '返金済'; statusIcon = <CheckCircle2 size={11} />; }
   else if (p.cancelled && p.paid && !p.refunded) { statusColor = '#d44a4a'; statusLabel = '返金待ち'; statusIcon = <RotateCcw size={11} />; }
-  else if (p.cancelled && !p.paid) { statusColor = '#9499a8'; statusLabel = 'キャンセル'; statusIcon = <XCircle size={11} />; }
-  else if (p.paid) { statusColor = '#3a8c5b'; statusLabel = '支払済'; statusIcon = <CheckCircle2 size={11} />; }
-  else { statusColor = '#e8645f'; statusLabel = '未払い'; statusIcon = <AlertCircle size={11} />; }
+  else if (p.cancelled) { statusColor = '#9499a8'; statusLabel = 'キャンセル'; statusIcon = <XCircle size={11} />; }
+  else if (ps === 'confirmed') { statusColor = '#3a8c5b'; statusLabel = '入金確認済'; statusIcon = <CheckCircle2 size={11} />; }
+  else if (ps === 'reported') { statusColor = '#c9962a'; statusLabel = '送金申告済'; statusIcon = <Clock size={11} />; }
+  else { statusColor = '#e8645f'; statusLabel = '未送金'; statusIcon = <AlertCircle size={11} />; }
 
   const rs = p.role ? ROLE_STYLES[p.role] : null;
   const now = () => new Date().toISOString().slice(0, 16).replace('T', ' ');
 
   const handlePaidConfirm = () => {
-    updateParticipant(p.id, { paid: true, paidAt: now() });
+    updateParticipant(p.id, { paid: true, paidAt: now(), paymentStatus: 'confirmed' });
     toast.push(`${p.name}様の入金を確認しました`, 'success');
   };
   const handleRefund = () => {

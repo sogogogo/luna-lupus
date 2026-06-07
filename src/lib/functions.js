@@ -29,6 +29,11 @@ export function cancelReservation(payload) {
   return httpsCallable(fns, 'cancelReservation')(payload).then((r) => r.data);
 }
 
+// 参加者: 送金の自己申告（未送金→送金済み申告）
+export function reportPayment(payload) {
+  return httpsCallable(fns, 'reportPayment')(payload).then((r) => r.data);
+}
+
 // 窓口2: 予約（サーバー側で定員チェック）
 export function bookSession(payload) {
   return httpsCallable(fns, 'createReservation')(payload).then((r) => r.data);

@@ -269,6 +269,7 @@ exports.getMyData = onCall(async (request) => {
         id: p.id,
         sessionId: p.sessionId,
         paid: p.paid === true,
+        paymentStatus: p.paymentStatus || (p.paid === true ? 'confirmed' : 'unpaid'),
         cancelled: p.cancelled === true,
         role: p.role || null,
         session: s ? toMyBookingSession(s) : null,
@@ -407,6 +408,7 @@ exports.createReservation = onCall(async (request) => {
         handle: me.handle || null,
         paid: false,                // 入金は運営者が確認
         paidAt: null,
+        paymentStatus: 'unpaid',    // 未送金 → reported(送金済み申告) → confirmed(入金確認済み)
         cancelled: false,
         refunded: false,
         role: null,
@@ -451,6 +453,36 @@ exports.cancelReservation = onCall(async (request) => {
     if (err instanceof HttpsError) throw err;
     logger.error('cancelReservation failed', err);
     throw new HttpsError('internal', 'キャンセル処理でエラーが発生しました。');
+  }
+});
+
+// =====================================================================
+// 支払い自己申告（要ログイン・自分の予約のみ）。PayPay L2: 未送金→送金済み申告
+//   実際の入金確認（confirmed）は運営者が管理画面で行う（Admin SDK 直接更新）
+// =====================================================================
+exports.reportPayment = onCall(async (request) => {
+  try {
+    if (!request.auth) throw new HttpsError('unauthenticated', 'ログインしてください。');
+    const participantId = (request.data && request.data.participantId) || '';
+    if (!participantId) throw new HttpsError('invalid-argument', '予約が指定されていません。');
+    const me = await resolveMyCustomer(request.auth.uid);
+    if (!me) throw new HttpsError('failed-precondition', 'プロフィール未設定です。');
+
+    const ref = db.collection('participants').doc(String(participantId));
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new HttpsError('not-found', '予約が見つかりません。');
+      const p = snap.data();
+      if (p.customerId !== me.id) throw new HttpsError('permission-denied', '自分の予約のみ操作できます。');
+      if (p.cancelled === true) throw new HttpsError('failed-precondition', 'キャンセル済みの予約です。');
+      if (p.paid === true || p.paymentStatus === 'confirmed') return; // 既に入金確認済み
+      tx.update(ref, { paymentStatus: 'reported', reportedAt: nowStamp() });
+    });
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    logger.error('reportPayment failed', err);
+    throw new HttpsError('internal', '送金申告でエラーが発生しました。');
   }
 });
 

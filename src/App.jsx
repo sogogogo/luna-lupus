@@ -7,7 +7,7 @@ import {
   List, LayoutGrid, CalendarDays, ListChecks, LogOut,
 } from 'lucide-react';
 import { signIn, signInWithGoogle, signOutUser, onAuthChange } from './lib/auth';
-import { claimAdmin, claimProfile } from './lib/functions'; // claimAdmin は※一時（S4で削除）
+import { claimAdmin, claimProfile, fetchMyData, bookSession, cancelReservation, answerPoll } from './lib/functions'; // claimAdmin は※一時（S4で削除）
 import {
   subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
   subscribeCustomers, seedCustomers,
@@ -438,39 +438,54 @@ function CustomersProvider({ children }) {
 //   linkHandle(handle): 初回リンク / loading: 解決中
 //   ※運営者(isAdmin)や未ログイン時は解決しない
 // =====================================================================
-const ParticipantContext = createContext({ profile: null, needHandle: false, loading: false, linkHandle: async () => {} });
+const ParticipantContext = createContext({ profile: null, bookings: [], responses: [], invitedSessions: [], needHandle: false, loading: false, linkHandle: async () => {}, refresh: () => {} });
 const useParticipant = () => useContext(ParticipantContext);
 
 function ParticipantProvider({ children }) {
   const { user, isAdmin } = useAuth();
   const toast = useToast();
   const [profile, setProfile] = useState(null);
+  const [bookings, setBookings] = useState([]);
+  const [responses, setResponses] = useState([]);
+  const [invitedSessions, setInvitedSessions] = useState([]);
   const [needHandle, setNeedHandle] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [reloadFlag, setReloadFlag] = useState(0);
+
+  const clear = () => { setProfile(null); setBookings([]); setResponses([]); setInvitedSessions([]); };
 
   useEffect(() => {
     let active = true;
-    if (!user || isAdmin) { setProfile(null); setNeedHandle(false); setLoading(false); return; }
+    if (!user || isAdmin) { clear(); setNeedHandle(false); setLoading(false); return; }
     setLoading(true);
-    claimProfile({})
+    fetchMyData()
       .then(res => {
         if (!active) return;
-        if (res.linked) { setProfile(res.profile); setNeedHandle(false); }
-        else { setProfile(null); setNeedHandle(true); }
+        if (res.linked) {
+          setProfile(res.profile);
+          setBookings(res.bookings || []);
+          setResponses(res.responses || []);
+          setInvitedSessions(res.invitedSessions || []);
+          setNeedHandle(false);
+        } else {
+          clear();
+          setNeedHandle(true); // 未リンク → Xハンドル入力を促す
+        }
       })
-      .catch(() => { if (active) toast.push('プロフィールの取得に失敗しました', 'error'); })
+      .catch(() => { if (active) toast.push('マイデータの取得に失敗しました', 'error'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [user, isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user, isAdmin, reloadFlag]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const refresh = () => setReloadFlag(x => x + 1);
   const linkHandle = async (handle) => {
     const res = await claimProfile({ handle });
-    if (res.linked) { setProfile(res.profile); setNeedHandle(false); }
+    if (res.linked) refresh(); // リンク後に getMyData で全データ取得
     return res;
   };
 
   return (
-    <ParticipantContext.Provider value={{ profile, needHandle, loading, linkHandle }}>
+    <ParticipantContext.Provider value={{ profile, bookings, responses, invitedSessions, needHandle, loading, linkHandle, refresh }}>
       {children}
     </ParticipantContext.Provider>
   );
@@ -909,7 +924,7 @@ function ParticipantAuthBar() {
 // 参加者側
 // =====================================================================
 function CustomerView({ sessions, participants, updateParticipant, addParticipant, brandFilter, setBrandFilter, schedulePolls, pollResponses, upsertPollResponse }) {
-  const { profile } = useParticipant();
+  const { profile, bookings, responses, refresh } = useParticipant();
   const toast = useToast();
   const [step, setStep] = useState('list');
   const [selected, setSelected] = useState(null);
@@ -1001,15 +1016,16 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
     setDateTo('');
   };
 
-  const myBookings = isLoggedIn ? participants.filter(p => p.customerId === myId) : [];
+  // 自分の予約は getMyData 由来（プロバイダ）。公開一覧の人数は購読のまま（S3-E2b で窓口化）
+  const myBookings = bookings;
   const bookedSessionIds = new Set(myBookings.filter(b => !b.cancelled).map(b => b.sessionId));
-  const getMyParticipant = (sid) => isLoggedIn ? participants.find(p => p.sessionId === sid && p.customerId === myId) : null;
+  const getMyParticipant = (sid) => myBookings.find(b => b.sessionId === sid) || null;
 
   // ====== 日程調整：自分宛て（公開 or 自分が招待された招待制）かつ募集中のみ ======
   const myPolls = (schedulePolls || []).filter(p =>
     p.status === 'open' && (!p.invitedCustomerIds || (isLoggedIn && p.invitedCustomerIds.includes(myId)))
   );
-  const hasAnswered = (pollId) => isLoggedIn && (pollResponses || []).some(r => r.pollId === pollId && r.customerId === myId);
+  const hasAnswered = (pollId) => (responses || []).some(r => r.pollId === pollId);
   const unansweredPolls = isLoggedIn ? myPolls.filter(p => !hasAnswered(p.id)) : [];
   const selectedPoll = selectedPollId ? schedulePolls.find(p => p.id === selectedPollId) : null;
 
@@ -1034,7 +1050,16 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
       myId={myId}
       profile={profile}
       onBack={() => { setStep('polls'); setSelectedPollId(null); }}
-      onSubmit={(response) => { upsertPollResponse(response); setStep('polls'); setSelectedPollId(null); }}
+      onSubmit={async (response) => {
+        try {
+          await answerPoll({ pollId: response.pollId, answers: response.answers });
+          refresh();
+          toast.push('回答を送信しました', 'success');
+          setStep('polls'); setSelectedPollId(null);
+        } catch (e) {
+          toast.push(e.message || '回答の送信に失敗しました', 'error');
+        }
+      }}
     />
   );
   if (step === 'polls') return (
@@ -1046,10 +1071,10 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
       onSelect={(pid) => { setSelectedPollId(pid); setStep('pollAnswer'); }}
     />
   );
-  if (step === 'mypage')   return <MyPage onBack={() => setStep('list')} sessions={sessions} participants={participants} myId={myId} />;
-  if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => setStep('done')} myId={myId} profile={profile} addParticipant={addParticipant} />;
+  if (step === 'mypage')   return <MyPage onBack={() => setStep('list')} />;
+  if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => { refresh(); setStep('done'); }} profile={profile} />;
   if (step === 'done' && selected)    return <BookingDone session={selected} onHome={() => { setStep('list'); setSelected(null); }} />;
-  if (step === 'detail' && selected)  return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => { if (!isLoggedIn) { toast.push('予約にはログインが必要です（上部のGoogleログイン）', 'warn'); return; } setStep('confirm'); }} myParticipant={getMyParticipant(selected.id)} updateParticipant={updateParticipant} myId={myId} />;
+  if (step === 'detail' && selected)  return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => { if (!isLoggedIn) { toast.push('予約にはログインが必要です（上部のGoogleログイン）', 'warn'); return; } setStep('confirm'); }} myParticipant={getMyParticipant(selected.id)} cancelBooking={async (pid) => { await cancelReservation({ participantId: pid }); refresh(); }} />;
 
   return (
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: '32px 28px 80px' }}>
@@ -1425,15 +1450,8 @@ function CustomerPollAnswer({ poll, pollResponses, myId, profile, onBack, onSubm
     if (!canSubmit) return;
     const cleaned = {};
     Object.entries(answers).forEach(([k, v]) => { if (v) cleaned[k] = v; });
-    onSubmit({
-      id: existing?.id || `res${Date.now()}`,
-      pollId: poll.id, customerId: myId,
-      name: profile?.name || '', handle: profile?.handle || '',
-      answers: cleaned,
-      comment: existing?.comment || '',
-      respondedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
-    });
-    toast.push('回答を送信しました', 'success');
+    // 送信は親（窓口経由）に委譲。トースト/遷移も親が行う
+    onSubmit({ pollId: poll.id, answers: cleaned });
   };
 
   const CHOICES = [
@@ -2590,7 +2608,7 @@ function AnnouncementModal({ onClose }) {
 }
 
 // ============ セッション詳細 ============
-function SessionDetail({ session, onBack, onBook, myParticipant, updateParticipant, myId }) {
+function SessionDetail({ session, onBack, onBook, myParticipant, cancelBooking }) {
   const b = session.brand;
   const isAlreadyBooked = myParticipant && !myParticipant.cancelled;
   const role = myParticipant?.role;
@@ -2700,9 +2718,9 @@ function SessionDetail({ session, onBack, onBook, myParticipant, updateParticipa
 
               <RoleCard role={role} sessionDate={session.date} accent={b.primary} />
 
-              <PaymentStatus paid={isPaid} paidAt={myParticipant.paidAt} onPay={onBook} accent={b.primary} />
+              <PaymentStatus paid={isPaid} paidAt={myParticipant.paidAt} accent={b.primary} />
 
-              <CancelSection session={session} myParticipant={myParticipant} updateParticipant={updateParticipant} />
+              <CancelSection session={session} myParticipant={myParticipant} cancelBooking={cancelBooking} />
             </>
           )}
 
@@ -2749,7 +2767,7 @@ function Detail({ icon, label, value }) {
   );
 }
 
-function PaymentStatus({ paid, paidAt, onPay, accent }) {
+function PaymentStatus({ paid, paidAt, accent }) {
   return (
     <div style={{
       padding: '12px 16px', marginBottom: 12, borderRadius: 10,
@@ -2761,17 +2779,13 @@ function PaymentStatus({ paid, paidAt, onPay, accent }) {
         {paid ? <CheckCircle2 size={16} color="#3a8c5b" /> : <AlertCircle size={16} color="#d97757" />}
         <div>
           <div style={{ fontSize: 12, color: paid ? '#3a8c5b' : '#d97757', fontWeight: 700 }}>
-            {paid ? '支払い済み' : '未払い'}
+            {paid ? '支払い済み' : '入金確認待ち'}
           </div>
           {paid && paidAt && <div className="num" style={{ fontSize: 10, color: '#6b6e7a' }}>{paidAt}</div>}
         </div>
       </div>
       {!paid && (
-        <button onClick={onPay} style={{
-          padding: '7px 14px', background: '#d97757', color: '#fff',
-          border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 700,
-          fontFamily: 'inherit', cursor: 'pointer',
-        }}>支払う</button>
+        <span style={{ fontSize: 10, color: '#9499a8' }}>運営の確認後に反映されます</span>
       )}
     </div>
   );
@@ -2825,21 +2839,25 @@ function RoleCard({ role, sessionDate, accent }) {
   );
 }
 
-function CancelSection({ session, myParticipant, updateParticipant }) {
+function CancelSection({ session, myParticipant, cancelBooking }) {
   const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
   const toast = useToast();
   const isToday = session.date === '2026-05-02';
   const refundable = !isToday;
 
-  const handleCancel = () => {
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    updateParticipant(myParticipant.id, {
-      cancelled: true,
-      cancelledAt: now,
-      // 前日までなら返金処理待ち、当日キャンセルなら返金なし
-    });
-    toast.push(refundable ? 'キャンセルを受け付けました。返金は3営業日以内に処理されます。' : 'キャンセルを受け付けました。', refundable ? 'success' : 'warn');
-    setConfirming(false);
+  const handleCancel = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await cancelBooking(myParticipant.id); // Cloud Functions 窓口（自分の予約のみ）
+      toast.push(refundable ? 'キャンセルを受け付けました。返金は3営業日以内に処理されます。' : 'キャンセルを受け付けました。', refundable ? 'success' : 'warn');
+      setConfirming(false);
+    } catch (e) {
+      toast.push(e.message || 'キャンセルに失敗しました', 'error');
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (myParticipant.cancelled) {
@@ -2892,33 +2910,28 @@ function CancelSection({ session, myParticipant, updateParticipant }) {
 }
 
 // ============ 予約フォーム / PayPay ============
-function ConfirmBooking({ session, onBack, onDone, myId, profile, addParticipant }) {
+function ConfirmBooking({ session, onBack, onDone, profile }) {
   const [step, setStep] = useState('form');
-  // 氏名・ハンドルはログイン中の本人プロフィールから（自己申告の自由入力ではなく本人に固定）
+  // 氏名・ハンドルは本人プロフィール（表示用。サーバー側でも本人レコードを使う）
   const [name, setName] = useState(profile?.name || '');
   const [handle, setHandle] = useState(profile?.handle || '');
   const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
   const b = session.brand;
 
-  const handlePaymentDone = () => {
-    // 実際に予約データに追加（Firestore へ書き込み・反映は onSnapshot）
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
-    const newId = `p${Date.now()}`;
-    addParticipant({
-      id: newId,
-      sessionId: session.id,
-      customerId: myId,
-      name, handle,
-      paid: true,
-      paidAt: now,
-      cancelled: false,
-      refunded: false,
-      role: null,
-      note: note || undefined,
-    });
-    toast.push('予約と支払いが完了しました', 'success');
-    onDone();
+  const handlePaymentDone = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      // 予約は Cloud Functions 窓口経由（定員チェック等はサーバー側）。入金は運営者が確認
+      await bookSession({ sessionId: session.id, note });
+      toast.push('予約を受け付けました。お支払いは運営の確認後に反映されます。', 'success');
+      onDone();
+    } catch (e) {
+      toast.push(e.message || '予約に失敗しました。時間をおいて再度お試しください。', 'error');
+      setSubmitting(false);
+    }
   };
 
   if (step === 'pay') {
@@ -3048,18 +3061,19 @@ function BookingDone({ session, onHome }) {
 }
 
 // ============ マイページ ============
-function MyPage({ onBack, sessions, participants, myId }) {
-  const customers = useCustomers();
-  const me = customers.find(c => c.id === myId);
+function MyPage({ onBack }) {
+  const { profile: me, bookings } = useParticipant();
   if (!me) return (
     <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="ホームに戻る" />
-      <div style={{ marginTop: 20 }}><EmptyCard text="顧客データを読み込み中…" /></div>
+      <div style={{ marginTop: 20 }}><EmptyCard text="プロフィールを読み込み中…" /></div>
     </div>
   );
-  const enrich = (p) => ({ ...p, session: enrichSessionById(sessions, p.sessionId) });
-  const myUpcoming = participants.filter(p => p.customerId === myId && !p.cancelled).map(enrich).filter(x => x.session?.status === 'open');
-  const myHistory = participants.filter(p => p.customerId === myId).map(enrich).filter(x => x.session?.status === 'closed');
+  const avatar = me.name ? me.name.slice(0, 1) : '？';
+  // 予約は getMyData 由来（自分の分のみ）。各 session を enrich して表示
+  const enriched = bookings.map(b => ({ ...b, session: b.session ? enrichSession(b.session) : null }));
+  const myUpcoming = enriched.filter(b => !b.cancelled && b.session?.status === 'open');
+  const myHistory = enriched.filter(b => b.session?.status === 'closed');
 
   return (
     <div className="fadeup" style={{ maxWidth: 880, margin: '0 auto', padding: '32px 28px 80px' }}>
@@ -3075,7 +3089,7 @@ function MyPage({ onBack, sessions, participants, myId }) {
             background: `linear-gradient(135deg, ${BRAND.okiraku.primary}, ${BRAND.okiraku.accent})`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: '#fff', fontSize: 28, fontWeight: 700, fontFamily: '"Zen Maru Gothic", serif',
-          }}>{me.avatar}</div>
+          }}>{avatar}</div>
           <div className="maru" style={{ fontSize: 16, fontWeight: 700, color: '#2c3140', marginBottom: 3 }}>{me.name}</div>
           <div className="num" style={{ fontSize: 11, color: '#6b6e7a' }}>{me.handle}</div>
           <div style={{

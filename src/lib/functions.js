@@ -19,6 +19,16 @@ export function claimProfile(payload) {
   return httpsCallable(fns, 'claimProfile')(payload || {}).then((r) => r.data);
 }
 
+// 参加者: 自分のデータ（プロフィール/予約/回答/招待会）を取得
+export function fetchMyData() {
+  return httpsCallable(fns, 'getMyData')().then((r) => r.data);
+}
+
+// 参加者: 予約のキャンセル（自分の予約のみ）
+export function cancelReservation(payload) {
+  return httpsCallable(fns, 'cancelReservation')(payload).then((r) => r.data);
+}
+
 // 窓口2: 予約（サーバー側で定員チェック）
 export function bookSession(payload) {
   return httpsCallable(fns, 'createReservation')(payload).then((r) => r.data);

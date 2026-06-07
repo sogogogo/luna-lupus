@@ -909,6 +909,8 @@ function ParticipantAuthBar() {
 // 参加者側
 // =====================================================================
 function CustomerView({ sessions, participants, updateParticipant, addParticipant, brandFilter, setBrandFilter, schedulePolls, pollResponses, upsertPollResponse }) {
+  const { profile } = useParticipant();
+  const toast = useToast();
   const [step, setStep] = useState('list');
   const [selected, setSelected] = useState(null);
   const [selectedPollId, setSelectedPollId] = useState(null);
@@ -929,13 +931,15 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  const ME_ID = 1;
+  // ログイン中の参加者本人の customerId（未ログインは null）。個人化はこれを基準にする
+  const myId = profile?.id ?? null;
+  const isLoggedIn = !!myId;
 
   // 自分が見える会だけにフィルタ（クローズドは招待リストに自分が含まれている時のみ）
   const visibleSessions = sessions
     .filter(s => s.status === 'open')
     .map(enrichSession)
-    .filter(s => !s.isClosed || (s.invitedCustomerIds || []).includes(ME_ID));
+    .filter(s => !s.isClosed || (isLoggedIn && (s.invitedCustomerIds || []).includes(myId)));
 
   // 価格レンジの判定
   const matchesPrice = (price) => {
@@ -997,16 +1001,16 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
     setDateTo('');
   };
 
-  const myBookings = participants.filter(p => p.customerId === ME_ID);
+  const myBookings = isLoggedIn ? participants.filter(p => p.customerId === myId) : [];
   const bookedSessionIds = new Set(myBookings.filter(b => !b.cancelled).map(b => b.sessionId));
-  const getMyParticipant = (sid) => participants.find(p => p.sessionId === sid && p.customerId === ME_ID);
+  const getMyParticipant = (sid) => isLoggedIn ? participants.find(p => p.sessionId === sid && p.customerId === myId) : null;
 
   // ====== 日程調整：自分宛て（公開 or 自分が招待された招待制）かつ募集中のみ ======
   const myPolls = (schedulePolls || []).filter(p =>
-    p.status === 'open' && (!p.invitedCustomerIds || p.invitedCustomerIds.includes(ME_ID))
+    p.status === 'open' && (!p.invitedCustomerIds || (isLoggedIn && p.invitedCustomerIds.includes(myId)))
   );
-  const hasAnswered = (pollId) => (pollResponses || []).some(r => r.pollId === pollId && r.customerId === ME_ID);
-  const unansweredPolls = myPolls.filter(p => !hasAnswered(p.id));
+  const hasAnswered = (pollId) => isLoggedIn && (pollResponses || []).some(r => r.pollId === pollId && r.customerId === myId);
+  const unansweredPolls = isLoggedIn ? myPolls.filter(p => !hasAnswered(p.id)) : [];
   const selectedPoll = selectedPollId ? schedulePolls.find(p => p.id === selectedPollId) : null;
 
   // ゲスト出演がある会（フィルタに連動）
@@ -1027,7 +1031,8 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
     <CustomerPollAnswer
       poll={selectedPoll}
       pollResponses={pollResponses}
-      myId={ME_ID}
+      myId={myId}
+      profile={profile}
       onBack={() => { setStep('polls'); setSelectedPollId(null); }}
       onSubmit={(response) => { upsertPollResponse(response); setStep('polls'); setSelectedPollId(null); }}
     />
@@ -1036,15 +1041,15 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
     <CustomerPollList
       polls={myPolls}
       pollResponses={pollResponses}
-      myId={ME_ID}
+      myId={myId}
       onBack={() => setStep('list')}
       onSelect={(pid) => { setSelectedPollId(pid); setStep('pollAnswer'); }}
     />
   );
-  if (step === 'mypage')   return <MyPage onBack={() => setStep('list')} sessions={sessions} participants={participants} myId={ME_ID} />;
-  if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => setStep('done')} myId={ME_ID} addParticipant={addParticipant} />;
+  if (step === 'mypage')   return <MyPage onBack={() => setStep('list')} sessions={sessions} participants={participants} myId={myId} />;
+  if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => setStep('done')} myId={myId} profile={profile} addParticipant={addParticipant} />;
   if (step === 'done' && selected)    return <BookingDone session={selected} onHome={() => { setStep('list'); setSelected(null); }} />;
-  if (step === 'detail' && selected)  return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => setStep('confirm')} myParticipant={getMyParticipant(selected.id)} updateParticipant={updateParticipant} myId={ME_ID} />;
+  if (step === 'detail' && selected)  return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => { if (!isLoggedIn) { toast.push('予約にはログインが必要です（上部のGoogleログイン）', 'warn'); return; } setStep('confirm'); }} myParticipant={getMyParticipant(selected.id)} updateParticipant={updateParticipant} myId={myId} />;
 
   return (
     <div style={{ maxWidth: 1080, margin: '0 auto', padding: '32px 28px 80px' }}>
@@ -1073,9 +1078,11 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
         </div>
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button onClick={() => setStep('mypage')} style={btnGhost()}>
-            <User size={14} /> マイページ
-          </button>
+          {isLoggedIn && (
+            <button onClick={() => setStep('mypage')} style={btnGhost()}>
+              <User size={14} /> マイページ
+            </button>
+          )}
           <button onClick={() => setSearchOpen(!searchOpen)} style={{
             ...btnGhost(),
             color: searchOpen || activeFilterCount > 0 ? '#fff' : '#2c3140',
@@ -1128,7 +1135,9 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
               )}
             </div>
             <div style={{ fontSize: 12, color: '#6b6e7a', marginTop: 3 }}>
-              {unansweredPolls.length > 0
+              {!isLoggedIn
+                ? `受付中の日程調整 ${myPolls.length} 件（回答にはログイン）`
+                : unansweredPolls.length > 0
                 ? `未回答の調整が ${unansweredPolls.length} 件あります`
                 : `あなた宛ての日程調整 ${myPolls.length} 件（すべて回答済み）`}
             </div>
@@ -1263,7 +1272,7 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
             // 参加者画面では：自分が見える会 + フィルタ・検索を反映
             const enriched = enrichSession(raw);
             if (raw.status !== 'open') return false;
-            if (enriched.isClosed && !(raw.invitedCustomerIds || []).includes(ME_ID)) return false;
+            if (enriched.isClosed && !(isLoggedIn && (raw.invitedCustomerIds || []).includes(myId))) return false;
             if (filter !== 'all' && enriched.brand.key !== filter) return false;
             if (!matchesQuery(enriched)) return false;
             if (!matchesPrice(enriched.price)) return false;
@@ -1333,7 +1342,8 @@ function CustomerView({ sessions, participants, updateParticipant, addParticipan
 
 // ============ 参加者：日程調整 回答待ちリスト ============
 function CustomerPollList({ polls, pollResponses, myId, onBack, onSelect }) {
-  const answeredOf = (pid) => (pollResponses || []).some(r => r.pollId === pid && r.customerId === myId);
+  const isLoggedIn = !!myId;
+  const answeredOf = (pid) => isLoggedIn && (pollResponses || []).some(r => r.pollId === pid && r.customerId === myId);
 
   return (
     <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
@@ -1371,10 +1381,12 @@ function CustomerPollList({ polls, pollResponses, myId, onBack, onSelect }) {
                     {brand ? brand.name + ' · ' : ''}候補 {poll.candidateDates.length} 日程{poll.deadline ? ` · 〜${poll.deadline}` : ''}
                   </div>
                 </div>
-                <span style={{
-                  flexShrink: 0, fontSize: 11, fontWeight: 700, padding: '4px 11px', borderRadius: 999,
-                  background: answered ? '#e6f3eb' : '#fdeceb', color: answered ? '#4a9968' : '#e8645f',
-                }}>{answered ? '回答済み' : '未回答'}</span>
+                {isLoggedIn && (
+                  <span style={{
+                    flexShrink: 0, fontSize: 11, fontWeight: 700, padding: '4px 11px', borderRadius: 999,
+                    background: answered ? '#e6f3eb' : '#fdeceb', color: answered ? '#4a9968' : '#e8645f',
+                  }}>{answered ? '回答済み' : '未回答'}</span>
+                )}
                 <ChevronRight size={18} color="#cfcbc2" style={{ flexShrink: 0 }} />
               </button>
             );
@@ -1386,13 +1398,12 @@ function CustomerPollList({ polls, pollResponses, myId, onBack, onSelect }) {
 }
 
 // ============ 参加者：日程調整 回答画面 ============
-function CustomerPollAnswer({ poll, pollResponses, myId, onBack, onSubmit }) {
+function CustomerPollAnswer({ poll, pollResponses, myId, profile, onBack, onSubmit }) {
   const toast = useToast();
-  const customers = useCustomers();
   const brand = poll.brand ? BRAND[poll.brand] : null;
   const accent = brand ? brand.primary : '#6b5dc7';
-  const me = customers.find(c => c.id === myId);
-  const existing = (pollResponses || []).find(r => r.pollId === poll.id && r.customerId === myId);
+  const isLoggedIn = !!myId;
+  const existing = isLoggedIn ? (pollResponses || []).find(r => r.pollId === poll.id && r.customerId === myId) : null;
   const isPublic = !poll.invitedCustomerIds; // 公開ポールのみ他の人の回答を表示
 
   const [answers, setAnswers] = useState(() => ({ ...(existing?.answers || {}) }));
@@ -1400,7 +1411,7 @@ function CustomerPollAnswer({ poll, pollResponses, myId, onBack, onSubmit }) {
 
   const setAns = (idx, val) => setAnswers(prev => ({ ...prev, [idx]: prev[idx] === val ? undefined : val }));
   const answeredCount = Object.values(answers).filter(Boolean).length;
-  const canSubmit = answeredCount >= 1;
+  const canSubmit = isLoggedIn && answeredCount >= 1;
 
   // 他の人の回答集計（自分含む全回答）
   const allResponses = (pollResponses || []).filter(r => r.pollId === poll.id);
@@ -1417,7 +1428,7 @@ function CustomerPollAnswer({ poll, pollResponses, myId, onBack, onSubmit }) {
     onSubmit({
       id: existing?.id || `res${Date.now()}`,
       pollId: poll.id, customerId: myId,
-      name: me?.name || '', handle: me?.handle || '',
+      name: profile?.name || '', handle: profile?.handle || '',
       answers: cleaned,
       comment: existing?.comment || '',
       respondedAt: new Date().toISOString().slice(0, 16).replace('T', ' '),
@@ -1526,7 +1537,9 @@ function CustomerPollAnswer({ poll, pollResponses, myId, onBack, onSubmit }) {
         }}>
           <Check size={16} /> {existing ? '回答を更新' : '回答を送信'}
         </button>
-        {!canSubmit && <div style={{ textAlign: 'center', fontSize: 11, color: '#9499a8', marginTop: 8 }}>少なくとも1つの候補日に回答してください</div>}
+        {!isLoggedIn
+          ? <div style={{ textAlign: 'center', fontSize: 11, color: '#d97757', marginTop: 8 }}>回答にはログインが必要です（一覧画面の上部からログイン）</div>
+          : !canSubmit && <div style={{ textAlign: 'center', fontSize: 11, color: '#9499a8', marginTop: 8 }}>少なくとも1つの候補日に回答してください</div>}
       </div>
     </div>
   );
@@ -2879,10 +2892,11 @@ function CancelSection({ session, myParticipant, updateParticipant }) {
 }
 
 // ============ 予約フォーム / PayPay ============
-function ConfirmBooking({ session, onBack, onDone, myId, addParticipant }) {
+function ConfirmBooking({ session, onBack, onDone, myId, profile, addParticipant }) {
   const [step, setStep] = useState('form');
-  const [name, setName] = useState('佐藤 健');
-  const [handle, setHandle] = useState('@takeru_jinrou');
+  // 氏名・ハンドルはログイン中の本人プロフィールから（自己申告の自由入力ではなく本人に固定）
+  const [name, setName] = useState(profile?.name || '');
+  const [handle, setHandle] = useState(profile?.handle || '');
   const [note, setNote] = useState('');
   const toast = useToast();
   const b = session.brand;
@@ -3070,9 +3084,8 @@ function MyPage({ onBack, sessions, participants, myId }) {
             fontSize: 10, fontWeight: 700, borderRadius: 999,
           }}>{me.tier}</div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
           <Stat label="参加回数" value={me.total} unit="回" />
-          <Stat label="累計支払" value={fmtYen(me.spent)} small />
           <Stat label="お気に入り" value={BRAND[me.favorite]?.name?.replace('人狼会', '') || '—'} small />
         </div>
       </div>

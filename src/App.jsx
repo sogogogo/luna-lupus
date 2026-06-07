@@ -13,7 +13,7 @@ import {
   subscribeCustomers, seedCustomers,
   subscribeParticipants, saveParticipant, patchParticipant, removeParticipant, seedParticipants,
   subscribeSchedulePolls, saveSchedulePoll, patchSchedulePoll, removeSchedulePoll, seedSchedulePolls,
-  subscribePollResponses, savePollResponse, removePollResponse, seedPollResponses,
+  subscribePollResponses, removePollResponse, seedPollResponses,
   subscribeAnnouncements, addAnnouncement, seedAnnouncements,
 } from './lib/firestore';
 // =====================================================================
@@ -610,10 +610,6 @@ function AppInner() {
     // 紐づく回答も Firestore から削除
     pollResponses.filter(r => r.pollId === id).forEach(r => removePollResponse(r.id).catch(() => {}));
   };
-  // response.id は CustomerPollAnswer 側で既存回答の id を再利用するため、setDoc（id指定）で作成も更新も兼ねる
-  const upsertPollResponse = (response) => {
-    savePollResponse(response).catch(() => toast.push('回答の送信に失敗しました', 'error'));
-  };
   const addAnnounce = (entry) => addAnnouncement(entry).catch(() => toast.push('告知履歴の記録に失敗しました', 'error'));
 
   // ブランドに応じたページ全体の背景
@@ -1096,7 +1092,6 @@ function CustomerView({ brandFilter, setBrandFilter }) {
       pollCounts={pollCounts}
       responses={responses}
       myId={myId}
-      profile={profile}
       onBack={() => { setStep('polls'); setSelectedPollId(null); }}
       onSubmit={async (response) => {
         try {
@@ -1471,7 +1466,7 @@ function CustomerPollList({ polls, responses, myId, onBack, onSelect }) {
 }
 
 // ============ 参加者：日程調整 回答画面 ============
-function CustomerPollAnswer({ poll, pollCounts, responses, myId, profile, onBack, onSubmit }) {
+function CustomerPollAnswer({ poll, pollCounts, responses, myId, onBack, onSubmit }) {
   const brand = poll.brand ? BRAND[poll.brand] : null;
   const accent = brand ? brand.primary : '#6b5dc7';
   const isLoggedIn = !!myId;
@@ -1702,7 +1697,7 @@ function addMonth(yearMonth, delta) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-function MonthCalendar({ yearMonth, setYearMonth, sessions, participants, onDayClick, mode = 'admin' }) {
+function MonthCalendar({ yearMonth, setYearMonth, sessions, onDayClick, mode = 'admin' }) {
   // mode: 'admin' = 全件 / 'customer' = 招待されたクローズドのみ表示+人数非表示も可
   const todayStr = '2026-05-03'; // デモ用の今日
   const cells = buildCalendarGrid(yearMonth, todayStr);
@@ -1869,7 +1864,7 @@ function getCalendarLabel(s) {
 
               {/* 会のリスト（1セッション=1ラベル） */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {daySessions.slice(0, 3).map((s, idx) => {
+                {daySessions.slice(0, 3).map((s) => {
                   const initial = BRAND_INITIAL[s.brand.key] || '?';
                   const label = getCalendarLabel(s);
                   const isOffline = s.isOffline;
@@ -2373,44 +2368,6 @@ function getThisWeekEnd() {
   return d.toISOString().slice(0, 10);
 }
 
-// ============ ブランドカード ============
-function BrandCard({ brand, count, onClick, active }) {
-  return (
-    <article onClick={onClick} style={{
-      cursor: 'pointer', position: 'relative',
-      padding: '24px 24px 22px',
-      background: brand.gradient,
-      borderRadius: 18,
-      border: `2px solid ${active ? brand.primary : 'transparent'}`,
-      transition: 'all 0.25s', overflow: 'hidden',
-    }}
-      onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-3px)'}
-      onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
-    >
-      {/* 装飾の水彩 */}
-      <div style={{
-        position: 'absolute', top: -30, right: -30, width: 140, height: 140,
-        borderRadius: '50%', opacity: 0.5,
-        background: `radial-gradient(circle, ${brand.accent}33 0%, transparent 70%)`,
-      }} />
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14, position: 'relative' }}>
-        <img src={brand.icon} alt="" className="float" style={{ width: 64, height: 64, objectFit: 'contain', flexShrink: 0 }} />
-        <div>
-          <div className="maru" style={{ fontSize: 18, fontWeight: 900, color: '#2c3140', marginBottom: 2 }}>{brand.name}</div>
-          <div className="hand" style={{ fontSize: 17, color: brand.primary }}>{brand.catch}</div>
-        </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 14, borderTop: `1px dashed ${brand.primary}44`, position: 'relative' }}>
-        <span style={{ fontSize: 11, color: '#6b6e7a' }}>今月の開催</span>
-        <span className="num" style={{ fontSize: 22, fontWeight: 700, color: brand.primary }}>
-          {count}<span style={{ fontSize: 11, color: '#6b6e7a', marginLeft: 4, fontWeight: 400 }}>会</span>
-        </span>
-      </div>
-    </article>
-  );
-}
-
 // ============ クローズド会カード ============
 function ClosedCard({ session, onClick }) {
   return (
@@ -2769,7 +2726,7 @@ function SessionDetail({ session, onBack, onBook, myParticipant, cancelBooking, 
 
               <RoleCard role={role} sessionDate={session.date} accent={b.primary} />
 
-              <PaymentStatus status={payStatus} price={session.price} accent={b.primary} onReport={() => reportBooking(myParticipant.id)} />
+              <PaymentStatus status={payStatus} price={session.price} onReport={() => reportBooking(myParticipant.id)} />
 
               <CancelSection session={session} myParticipant={myParticipant} cancelBooking={cancelBooking} />
             </>
@@ -2819,7 +2776,7 @@ function Detail({ icon, label, value }) {
 }
 
 // 支払い状態（3段階）＋ 未送金時は PayPay 送金導線（QRは後日設定・プレースホルダ）
-function PaymentStatus({ status, price, accent, onReport }) {
+function PaymentStatus({ status, price, onReport }) {
   const [reporting, setReporting] = useState(false);
   const toast = useToast();
 
@@ -4350,7 +4307,6 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
           yearMonth={yearMonth}
           setYearMonth={setYearMonth}
           sessions={sessions}
-          participants={participants}
           mode="admin"
           onDayClick={(date, daySessions) => { setPopupDate(date); setPopupSessions(daySessions); }}
         />
@@ -4459,7 +4415,6 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
 function SessionFormModal({ mode, initial, onSave, onClose }) {
   const isEdit = mode === 'edit';
   const initialPlan = initial?.plan || 'okiraku_zoom_10';
-  const initialPlanDef = PLAN_DEFS[initialPlan];
 
   const [planKey, setPlanKey] = useState(initialPlan);
   const [date, setDate] = useState(initial?.date || '2026-05-25');

@@ -34,7 +34,6 @@ const firebaseConfig = {
 
 // 未設定（.env.local 未記入）の場合に気づけるよう、開発時のみ警告を出す
 if (import.meta.env.DEV && !firebaseConfig.apiKey) {
-  // eslint-disable-next-line no-console
   console.warn('[firebase] VITE_FIREBASE_* が未設定です。.env.local を確認してください（.env.example 参照）。');
 }
 

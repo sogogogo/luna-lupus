@@ -3307,46 +3307,48 @@ function AdminNoPermission() {
 }
 
 // =====================================================================
-// 管理画面の「今後実装予定」案内（管理者のみ。参加者画面には一切出さない）
-//   kind 'planned' = Phase 2 予定（機能未実装・グレー系）
-//   kind 'expand'  = 拡張予定（簡易版は現在も稼働・ブランド淡色）
-//   ※対象タブはここ1箇所で増減できる
+// 管理画面の案内バッジ＆パネル（管理者のみ。参加者画面には一切出さない）
+//   kind 'planned'  = Phase 2 予定（機能未実装・グレー系）
+//   kind 'expand'   = 拡張予定（簡易版は現在も稼働・ブランド淡色）
+//   kind 'external' = 専用アプリ開発中（別アプリへ分離・紫系）。tab本体は表示せず案内のみ
+//   ※対象タブ・種別・文言はここ1箇所で増減できる
 // =====================================================================
 const PHASE_NOTES = {
   announce:  { kind: 'planned', note: '配信機能はPhase 2で実装予定です。現在は告知内容の記録・管理がご利用いただけます。メール・SNSへの自動配信は次フェーズで対応します。' },
   payments:  { kind: 'expand',  note: '現在は送金の自己申告・確認方式でご利用いただけます。PayPay自動決済との完全連携はPhase 2で対応予定です。' },
   customers: { kind: 'expand',  note: '顧客情報の閲覧・基本管理がご利用いただけます。詳細な編集機能はPhase 2で拡張予定です。' },
-  roles:     { kind: 'expand',  note: '役職の割り振り機能がご利用いただけます。配役履歴の保存・分析はPhase 2で対応予定です。' },
+  roles:     { kind: 'external', title: '役職配布は専用アプリで開発中です', note: '役職の配布機能は、人狼GM向け専用アプリ『人狼会CAST』として開発中です。この管理画面とは別アプリとして提供予定です。' },
 };
-const PHASE_BADGE_LABEL = { planned: 'Phase 2 予定', expand: '拡張予定' };
+const PHASE_BADGE_LABEL = { planned: 'Phase 2 予定', expand: '拡張予定', external: '専用アプリ開発中' };
+const PHASE_STYLE = {
+  planned:  { badge: { background: '#eceae4', color: '#9499a8', border: '1px solid #ddd9d0' }, panelBg: '#faf9f6', panelBd: '#e8e5dd', icon: '#9499a8' },
+  expand:   { badge: { background: `${BRAND.stepup.primary}14`, color: BRAND.stepup.primary, border: `1px solid ${BRAND.stepup.primary}40` }, panelBg: `${BRAND.stepup.primary}0d`, panelBd: `${BRAND.stepup.primary}33`, icon: BRAND.stepup.primary },
+  external: { badge: { background: '#ece8f7', color: '#6e57b8', border: '1px solid #6e57b833' }, panelBg: '#f6f4fb', panelBd: '#ddd5f0', icon: '#6e57b8' },
+};
 
 // タブ名の横に出す小さなバッジ
 function PhaseBadge({ kind }) {
-  const planned = kind === 'planned';
-  const style = planned
-    ? { background: '#eceae4', color: '#9499a8', border: '1px solid #ddd9d0' }
-    : { background: `${BRAND.stepup.primary}14`, color: BRAND.stepup.primary, border: `1px solid ${BRAND.stepup.primary}40` };
+  const s = PHASE_STYLE[kind] || PHASE_STYLE.planned;
   return (
-    <span style={{ marginLeft: 5, padding: '1px 6px', borderRadius: 999, fontSize: 9, fontWeight: 700, lineHeight: 1.4, ...style }}>
+    <span style={{ marginLeft: 5, padding: '1px 6px', borderRadius: 999, fontSize: 9, fontWeight: 700, lineHeight: 1.4, ...s.badge }}>
       {PHASE_BADGE_LABEL[kind]}
     </span>
   );
 }
 
-// タブを開いたときの案内パネル
+// タブを開いたときの案内パネル（info.title があれば見出しを表示）
 function PhaseNote({ info }) {
-  const planned = info.kind === 'planned';
-  const accent = planned ? '#9499a8' : BRAND.stepup.primary;
+  const s = PHASE_STYLE[info.kind] || PHASE_STYLE.planned;
   return (
     <div style={{
       marginBottom: 20, padding: '12px 16px', borderRadius: 12,
-      background: planned ? '#faf9f6' : `${BRAND.stepup.primary}0d`,
-      border: `1px solid ${planned ? '#e8e5dd' : `${BRAND.stepup.primary}33`}`,
+      background: s.panelBg, border: `1px solid ${s.panelBd}`,
       display: 'flex', gap: 10, alignItems: 'flex-start',
     }}>
-      <Sparkles size={15} color={accent} style={{ flexShrink: 0, marginTop: 1 }} />
+      <Sparkles size={15} color={s.icon} style={{ flexShrink: 0, marginTop: 1 }} />
       <div>
-        <div style={{ marginBottom: 3 }}><PhaseBadge kind={info.kind} /></div>
+        <div style={{ marginBottom: 4 }}><PhaseBadge kind={info.kind} /></div>
+        {info.title && <div className="maru" style={{ fontSize: 14, fontWeight: 900, color: '#2c3140', marginBottom: 4 }}>{info.title}</div>}
         <div className="maru" style={{ fontSize: 12, color: '#6b6e7a', lineHeight: 1.7 }}>{info.note}</div>
       </div>
     </div>
@@ -3356,7 +3358,7 @@ function PhaseNote({ info }) {
 function AdminView({ sessions, participants, updateParticipant, updateSession, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, deleteSchedulePoll, announceHistory, addAnnounce }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [selectedSession, setSelectedSession] = useState(null);
+  // 役職割り振りは専用アプリ『人狼会CAST』へ分離。当タブは案内パネルのみ表示（PhaseNote external）。
 
   return (
     <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 80px' }}>
@@ -3373,7 +3375,7 @@ function AdminView({ sessions, participants, updateParticipant, updateSession, a
           const Icon = t.icon;
           const active = tab === t.id;
           return (
-            <button key={t.id} onClick={() => { setTab(t.id); setSelectedCustomer(null); setSelectedSession(null); }} style={{
+            <button key={t.id} onClick={() => { setTab(t.id); setSelectedCustomer(null); }} style={{
               padding: '11px 16px', background: 'transparent', border: 'none',
               color: active ? '#2c3140' : '#9499a8',
               borderBottom: `2px solid ${active ? '#2c3140' : 'transparent'}`,
@@ -3390,9 +3392,8 @@ function AdminView({ sessions, participants, updateParticipant, updateSession, a
       {tab === 'schedule' && <SchedulePollsAdmin schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} deleteSchedulePoll={deleteSchedulePoll} addAnnounce={addAnnounce} />}
       {tab === 'sessions' && <SessionsAdmin sessions={sessions} participants={participants} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} />}
       {tab === 'payments' && <PaymentsAdmin sessions={sessions} participants={participants} updateParticipant={updateParticipant} />}
-      {tab === 'roles' && (selectedSession
-        ? <RoleAssignment session={enrichSession(selectedSession)} participants={participants} updateParticipant={updateParticipant} onBack={() => setSelectedSession(null)} />
-        : <RolesList sessions={sessions} participants={participants} onSelect={setSelectedSession} />)}
+      {/* tab === 'roles' は案内パネル（PhaseNote external）のみ。配布機能は専用アプリ『人狼会CAST』で開発中のため非表示。
+          RoleAssignment / RolesList のコードは将来のCAST移植用に残置（下部に定義あり）。 */}
       {tab === 'announce' && <AnnouncementCenter sessions={sessions} participants={participants} history={announceHistory} addHistory={addAnnounce} />}
       {tab === 'customers' && (selectedCustomer
         ? <CustomerDetail customer={selectedCustomer} onBack={() => setSelectedCustomer(null)} sessions={sessions} participants={participants} />
@@ -5060,6 +5061,9 @@ function ParticipantRow({ idx, participant, session, updateParticipant }) {
 }
 
 // ============ 役職割り振り（一覧）============
+// 注: 役職配布は専用アプリ『人狼会CAST』へ分離したため現在は未使用（管理画面では非表示）。
+//     将来のCAST移植時の参照用に残置。
+// eslint-disable-next-line no-unused-vars
 function RolesList({ sessions, participants, onSelect }) {
   const upcoming = sessions.filter(s => s.status === 'open').map(enrichSession);
   return (
@@ -5111,6 +5115,9 @@ function RolesList({ sessions, participants, onSelect }) {
 }
 
 // ============ 役職割り振り（詳細）============
+// 注: 役職配布は専用アプリ『人狼会CAST』へ分離したため現在は未使用（管理画面では非表示）。
+//     将来のCAST移植時の参照用に残置。
+// eslint-disable-next-line no-unused-vars
 function RoleAssignment({ session, participants, updateParticipant, onBack }) {
   const [mode, setMode] = useState('manual');
   const [confirmFinalize, setConfirmFinalize] = useState(false);

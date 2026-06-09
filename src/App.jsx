@@ -292,6 +292,20 @@ const ROLE_STYLES = {
 // 将来 ID が変わったらここ1箇所だけ直せば全画面に反映される。
 const PAYPAY_ID = 'jinro0710';
 
+// plan が PLAN_DEFS に無い/欠落の会でも brand を必ず持たせるためのフォールバック。
+// （消費側は s.brand.primary 等をガードなしで参照するため、brand 無し session は白画面の原因になる）
+const FALLBACK_BRAND = {
+  key: 'other',
+  name: 'その他の会',
+  catch: '',
+  icon: null,
+  primary: '#6b6e7a',
+  accent: '#9499a8',
+  soft: '#eeece8',
+  softer: '#f6f5f3',
+  gradient: 'linear-gradient(135deg, #eeece8 0%, #f4f2ee 100%)',
+};
+
 // Helper: 会データに plan の中身を合成して使いやすくする
 // 冪等化済み：既にenrich済みのsessionが渡されてもエラーにならない
 function enrichSession(s) {
@@ -300,7 +314,23 @@ function enrichSession(s) {
   if (s.brand && typeof s.plan === 'object') return s;
   const planKey = typeof s.plan === 'string' ? s.plan : null;
   const plan = planKey ? PLAN_DEFS[planKey] : null;
-  if (!plan) return s; // 想定外のデータでもクラッシュしない
+  if (!plan) {
+    // 想定外データ（未知/欠落 plan）でも brand を必ず付与し、消費側の s.brand 参照で落ちないようにする
+    const isOffline = s.platform === '対面';
+    return {
+      ...s,
+      brand: FALLBACK_BRAND,
+      plan: { brand: 'other', mode: 'flex', label: s.customTitle || 'その他の会', price: s.customPrice ?? 0, capacity: s.capacity ?? 0 },
+      type: s.customTitle || 'その他の会',
+      price: s.customPrice ?? 0,
+      capacity: s.capacity ?? 0,
+      title: s.customTitle || 'その他の会',
+      isOnline: !!s.platform && !isOffline,
+      isOffline,
+      venue: s.platform || '',
+      isClosed: false,
+    };
+  }
   const brand = BRAND[plan.brand];
   return {
     ...s,
@@ -446,7 +476,7 @@ function CustomersProvider({ children }) {
 //   linkHandle(handle): 初回リンク / loading: 解決中
 //   ※運営者(isAdmin)や未ログイン時は解決しない
 // =====================================================================
-const ParticipantContext = createContext({ profile: null, bookings: [], responses: [], invitedSessions: [], needHandle: false, loading: false, linkHandle: async () => {}, refresh: () => {} });
+const ParticipantContext = createContext({ profile: null, bookings: [], responses: [], invitedSessions: [], needHandle: false, loading: false, error: false, linkHandle: async () => {}, refresh: () => {} });
 const useParticipant = () => useContext(ParticipantContext);
 
 function ParticipantProvider({ children }) {
@@ -458,14 +488,16 @@ function ParticipantProvider({ children }) {
   const [invitedSessions, setInvitedSessions] = useState([]);
   const [needHandle, setNeedHandle] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false); // getMyData 取得失敗（再試行導線の表示用）
   const [reloadFlag, setReloadFlag] = useState(0);
 
   const clear = () => { setProfile(null); setBookings([]); setResponses([]); setInvitedSessions([]); };
 
   useEffect(() => {
     let active = true;
-    if (!user || isAdmin) { clear(); setNeedHandle(false); setLoading(false); return; }
+    if (!user || isAdmin) { clear(); setNeedHandle(false); setLoading(false); setError(false); return; }
     setLoading(true);
+    setError(false);
     fetchMyData()
       .then(res => {
         if (!active) return;
@@ -480,7 +512,11 @@ function ParticipantProvider({ children }) {
           setNeedHandle(true); // 未リンク → Xハンドル入力を促す
         }
       })
-      .catch(() => { if (active) toast.push('マイデータの取得に失敗しました', 'error'); })
+      .catch(() => {
+        if (!active) return;
+        setError(true); // 失敗状態を保持し、AuthBar に再試行ボタンを出す
+        toast.push('マイデータの取得に失敗しました', 'error');
+      })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [user, isAdmin, reloadFlag]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -493,7 +529,7 @@ function ParticipantProvider({ children }) {
   };
 
   return (
-    <ParticipantContext.Provider value={{ profile, bookings, responses, invitedSessions, needHandle, loading, linkHandle, refresh }}>
+    <ParticipantContext.Provider value={{ profile, bookings, responses, invitedSessions, needHandle, loading, error, linkHandle, refresh }}>
       {children}
     </ParticipantContext.Provider>
   );
@@ -728,7 +764,7 @@ function AppInner() {
           )}
           {/* ログアウト（管理画面でログイン中のみ） */}
           {isAdminRoute && user && (
-            <button onClick={async () => { await signOutUser(); toast.push('ログアウトしました', 'info'); }} style={{
+            <button onClick={async () => { try { await signOutUser(); toast.push('ログアウトしました', 'info'); } catch { toast.push('ログアウトに失敗しました', 'error'); } }} style={{
               display: 'flex', alignItems: 'center', gap: 5,
               padding: '7px 12px', background: '#fff', border: '1px solid #e0ddd6',
               borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit',
@@ -894,7 +930,7 @@ function LoginScreen({ onBack }) {
 // ＋ 初回の X ハンドル入力モーダル
 function ParticipantAuthBar() {
   const { user, isAdmin } = useAuth();
-  const { profile, needHandle, linkHandle } = useParticipant();
+  const { profile, needHandle, linkHandle, loading: pLoading, error: pError, refresh } = useParticipant();
   const toast = useToast();
   const [handle, setHandle] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -911,7 +947,10 @@ function ParticipantAuthBar() {
       }
     }
   };
-  const logout = async () => { await signOutUser(); toast.push('ログアウトしました', 'info'); setDismissed(false); };
+  const logout = async () => {
+    try { await signOutUser(); toast.push('ログアウトしました', 'info'); setDismissed(false); }
+    catch { toast.push('ログアウトに失敗しました', 'error'); }
+  };
   const submitHandle = async () => {
     if (!handle.trim() || submitting) return;
     setSubmitting(true);
@@ -935,10 +974,19 @@ function ParticipantAuthBar() {
           </button>
         </div>
       ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 16px', background: '#f6f8f6', border: '1px solid #e0e8e0', borderRadius: 12 }}>
-          <span style={{ fontSize: 13, color: '#2c3140', fontWeight: 700, flex: 1 }}>
-            {profile ? `ようこそ、${profile.name} さん` : (needHandle ? 'Xハンドルを設定してください' : 'ログイン中…')}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 16px', background: pError && !profile ? '#fff7f4' : '#f6f8f6', border: `1px solid ${pError && !profile ? '#f0d3c6' : '#e0e8e0'}`, borderRadius: 12 }}>
+          <span style={{ fontSize: 13, color: pError && !profile ? '#d97757' : '#2c3140', fontWeight: 700, flex: 1 }}>
+            {profile ? `ようこそ、${profile.name} さん`
+              : needHandle ? 'Xハンドルを設定してください'
+              : pError ? 'マイデータの読み込みに失敗しました'
+              : 'ログイン中…'}
           </span>
+          {/* 取得失敗時の再試行（再読込せずに getMyData を再取得） */}
+          {pError && !profile && !needHandle && (
+            <button onClick={refresh} disabled={pLoading} style={{ padding: '7px 12px', background: pLoading ? '#e0ddd6' : '#c9962a', color: '#fff', border: 'none', borderRadius: 8, cursor: pLoading ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <RotateCcw size={12} /> {pLoading ? '再取得中…' : '再試行'}
+            </button>
+          )}
           {needHandle && dismissed && (
             <button onClick={() => setDismissed(false)} style={{ padding: '7px 12px', background: '#c9962a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700 }}>Xハンドルを設定</button>
           )}
@@ -1025,8 +1073,9 @@ function CustomerView({ brandFilter, setBrandFilter }) {
   // 公開会（窓口・closed除外済み）＋ 自分が招待されたクローズド会（getMyData由来）
   const sessionCounts = pub?.sessionCounts || {};
   const countOf = (sid) => sessionCounts[sid] ?? 0;
-  const publicSessions = (pub?.sessions || []).map(enrichSession);
-  const invitedEnriched = (invitedSessions || []).map(enrichSession);
+  // enrichSession は必ず brand を付与する（フォールバック含む）が、保険として brand 無しは除外（白画面防止）
+  const publicSessions = (pub?.sessions || []).map(enrichSession).filter(s => s && s.brand);
+  const invitedEnriched = (invitedSessions || []).map(enrichSession).filter(s => s && s.brand);
   const visibleSessions = [...publicSessions, ...invitedEnriched];
 
   // 価格レンジの判定
@@ -1507,22 +1556,25 @@ function CustomerPollAnswer({ poll, pollCounts, responses, myId, onBack, onSubmi
 
   const [answers, setAnswers] = useState(() => ({ ...(existing?.answers || {}) }));
   const [showOthers, setShowOthers] = useState(false);
+  const [submitting, setSubmitting] = useState(false); // 二重送信防止
 
   const setAns = (idx, val) => setAnswers(prev => ({ ...prev, [idx]: prev[idx] === val ? undefined : val }));
   const answeredCount = Object.values(answers).filter(Boolean).length;
-  const canSubmit = isLoggedIn && answeredCount >= 1;
+  const canSubmit = isLoggedIn && answeredCount >= 1 && !submitting;
 
   // 他の人の回答集計（窓口の集計値 pollCounts 由来。個人情報は含まない）
   const counts = (pollCounts && pollCounts[poll.id]) || [];
   const aggOf = (idx) => counts[idx] || { yes: 0, maybe: 0, no: 0 };
   const totalResponses = counts.reduce((m, c) => Math.max(m, (c.yes || 0) + (c.maybe || 0) + (c.no || 0)), 0);
 
-  const submit = () => {
-    if (!canSubmit) return;
+  const submit = async () => {
+    if (!canSubmit || submitting) return;
+    setSubmitting(true);
     const cleaned = {};
     Object.entries(answers).forEach(([k, v]) => { if (v) cleaned[k] = v; });
-    // 送信は親（窓口経由）に委譲。トースト/遷移も親が行う
-    onSubmit({ pollId: poll.id, answers: cleaned });
+    // 送信は親（窓口経由）に委譲。トースト/遷移も親が行う（親は失敗時も再throwしない）
+    try { await onSubmit({ pollId: poll.id, answers: cleaned }); }
+    finally { setSubmitting(false); }
   };
 
   const CHOICES = [
@@ -1624,11 +1676,11 @@ function CustomerPollAnswer({ poll, pollCounts, responses, myId, onBack, onSubmi
           fontFamily: 'inherit', fontSize: 14, fontWeight: 700,
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         }}>
-          <Check size={16} /> {existing ? '回答を更新' : '回答を送信'}
+          <Check size={16} /> {submitting ? '送信中…' : (existing ? '回答を更新' : '回答を送信')}
         </button>
         {!isLoggedIn
           ? <div style={{ textAlign: 'center', fontSize: 11, color: '#d97757', marginTop: 8 }}>回答にはログインが必要です（一覧画面の上部からログイン）</div>
-          : !canSubmit && <div style={{ textAlign: 'center', fontSize: 11, color: '#9499a8', marginTop: 8 }}>少なくとも1つの候補日に回答してください</div>}
+          : (!canSubmit && !submitting) && <div style={{ textAlign: 'center', fontSize: 11, color: '#9499a8', marginTop: 8 }}>少なくとも1つの候補日に回答してください</div>}
       </div>
     </div>
   );
@@ -2648,10 +2700,22 @@ function paymentStatusOf(p) {
 
 // ============ セッション詳細 ============
 function SessionDetail({ session, onBack, onBook, myParticipant, cancelBooking, reportBooking }) {
+  const toast = useToast();
   const b = session.brand;
   const isAlreadyBooked = myParticipant && !myParticipant.cancelled;
   const role = myParticipant?.role;
   const payStatus = paymentStatusOf(myParticipant);
+
+  // ミーティングURLのコピー（失敗時はフィードバック。未対応環境も考慮）
+  const copyMeetingUrl = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error('no clipboard');
+      await navigator.clipboard.writeText(session.meetingUrl);
+      toast.push('ミーティングリンクをコピーしました', 'success');
+    } catch {
+      toast.push('コピーできませんでした。リンクを長押しでコピーしてください', 'warn');
+    }
+  };
 
   return (
     <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
@@ -2731,7 +2795,7 @@ function SessionDetail({ session, onBack, onBook, myParticipant, cancelBooking, 
                       textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       border: '1px solid #d4e3f0',
                     }}>{session.meetingUrl}</a>
-                    <button onClick={() => navigator.clipboard?.writeText(session.meetingUrl)} style={{
+                    <button onClick={copyMeetingUrl} style={{
                       padding: '8px 10px', background: '#3a8dc4', border: 'none', color: '#fff',
                       borderRadius: 6, cursor: 'pointer',
                     }}><Copy size={12} /></button>
@@ -3236,8 +3300,9 @@ function MyPage({ onBack }) {
   const avatar = me.name ? me.name.slice(0, 1) : '？';
   // 予約は getMyData 由来（自分の分のみ）。各 session を enrich して表示
   const enriched = bookings.map(b => ({ ...b, session: b.session ? enrichSession(b.session) : null }));
-  const myUpcoming = enriched.filter(b => !b.cancelled && b.session?.status === 'open');
-  const myHistory = enriched.filter(b => b.session?.status === 'closed');
+  // session?.brand を条件に含め、enrich できなかった予約は描画対象から除外（s.brand 参照での白画面防止）
+  const myUpcoming = enriched.filter(b => !b.cancelled && b.session?.brand && b.session.status === 'open');
+  const myHistory = enriched.filter(b => b.session?.brand && b.session.status === 'closed');
 
   return (
     <div className="fadeup" style={{ maxWidth: 880, margin: '0 auto', padding: '32px 28px 80px' }}>
@@ -3386,7 +3451,7 @@ function AdminNoPermission({ onBack }) {
             display: 'inline-flex', alignItems: 'center', gap: 5,
           }}><ChevronLeft size={14} /> 参加者ページに戻る</button>
         )}
-        <button onClick={async () => { await signOutUser(); toast.push('ログアウトしました', 'info'); }} style={{
+        <button onClick={async () => { try { await signOutUser(); toast.push('ログアウトしました', 'info'); } catch { toast.push('ログアウトに失敗しました', 'error'); } }} style={{
           padding: '10px 18px', background: '#fff', border: '1px solid #d4d0c8', color: '#2c3140',
           borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
         }}>ログアウト</button>

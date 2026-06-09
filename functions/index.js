@@ -38,7 +38,8 @@ const PLAN_META = {
 function isPublicSession(s) {
   if (!s || s.status !== 'open') return false;
   const meta = PLAN_META[s.plan];
-  if (meta && meta.brand === 'closed') return false;
+  if (!meta) return false; // 未知/欠落 plan の会は公開対象に含めない（フロントの enrich 不能データを流さない）
+  if (meta.brand === 'closed') return false;
   if (Array.isArray(s.invitedCustomerIds) && s.invitedCustomerIds.length > 0) return false;
   return true;
 }

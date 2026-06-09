@@ -468,18 +468,19 @@ const CustomersContext = createContext([]);
 const useCustomers = () => useContext(CustomersContext);
 
 function CustomersProvider({ children }) {
-  const { isAdmin } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [customers, setCustomers] = useState([]);
   const toast = useToast();
   useEffect(() => {
-    // 顧客データの購読は運営者のみ（参加者は customers を直接読まない）
-    if (!isAdmin) { setCustomers([]); return; }
+    // 顧客データの購読は運営者のみ（参加者は customers を直接読まない）。
+    // user も依存に含め、アカウント切替（admin→別ユーザー）時に前運営者の顧客データを即破棄＝混線防止
+    if (!isAdmin || !user) { setCustomers([]); return; }
     const unsub = subscribeCustomers(
       rows => setCustomers(rows),
       () => toast.push('顧客データの読み込みに失敗しました', 'error'),
     );
     return () => unsub();
-  }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isAdmin, user]); // eslint-disable-line react-hooks/exhaustive-deps
   return <CustomersContext.Provider value={customers}>{children}</CustomersContext.Provider>;
 }
 
@@ -505,10 +506,19 @@ function ParticipantProvider({ children }) {
   const [reloadFlag, setReloadFlag] = useState(0);
 
   const clear = () => { setProfile(null); setBookings([]); setResponses([]); setInvitedSessions([]); };
+  const prevIdRef = useRef(undefined); // 直前のログイン主体（uid）。切替検知用
 
   useEffect(() => {
     let active = true;
-    if (!user || isAdmin) { clear(); setNeedHandle(false); setLoading(false); setError(false); return; }
+    // アカウント切替（A→B 直接ログイン含む）を検知したら、新ユーザーのデータ取得を待たずに
+    // 前ユーザーの痕跡（プロフィール・予約・支払い・回答・招待会）を即クリア＝データ混線防止
+    const id = (!user || isAdmin) ? null : user.uid;
+    if (prevIdRef.current !== id) {
+      clear();
+      setNeedHandle(false);
+      prevIdRef.current = id;
+    }
+    if (!user || isAdmin) { setLoading(false); setError(false); return; }
     setLoading(true);
     setError(false);
     fetchMyData()
@@ -3306,9 +3316,10 @@ function ProfileEditModal({ profile, onClose, onSaved }) {
 }
 
 function MyPage({ onBack }) {
-  const { profile: me, bookings, refresh } = useParticipant();
+  const { profile: me, bookings, loading, refresh } = useParticipant();
   const [editing, setEditing] = useState(false);
-  if (!me) return (
+  // loading 中（アカウント切替・再取得）は古い me を描画しない＝前ユーザーのデータ混線を二重に防止
+  if (!me || loading) return (
     <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="ホームに戻る" />
       <div style={{ marginTop: 20 }}><EmptyCard text="プロフィールを読み込み中…" /></div>

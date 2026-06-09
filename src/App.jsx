@@ -359,6 +359,17 @@ const fmtMD = (dateStr, day) => {
   return day ? `${m}/${d}（${day}）` : `${m}/${d}`;
 };
 
+// URLのスキーム検証（XSS防止）: http/https のみ許可。それ以外（javascript: 等）は null
+const safeHttpUrl = (url) => {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    const u = new URL(url.trim());
+    return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : null;
+  } catch {
+    return null;
+  }
+};
+
 // =====================================================================
 // トースト通知
 // =====================================================================
@@ -2789,12 +2800,18 @@ function SessionDetail({ session, onBack, onBook, myParticipant, cancelBooking, 
                     <span style={{ fontSize: 11, color: '#3a8dc4', fontWeight: 700 }}>{session.platform} ミーティングリンク</span>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <a href={session.meetingUrl} target="_blank" rel="noreferrer" style={{
-                      flex: 1, fontSize: 12, color: '#2c3140', fontFamily: "'DM Mono', monospace",
-                      padding: '8px 12px', background: '#fff', borderRadius: 6,
-                      textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      border: '1px solid #d4e3f0',
-                    }}>{session.meetingUrl}</a>
+                    {(() => {
+                      const linkStyle = {
+                        flex: 1, fontSize: 12, color: '#2c3140', fontFamily: "'DM Mono', monospace",
+                        padding: '8px 12px', background: '#fff', borderRadius: 6,
+                        textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        border: '1px solid #d4e3f0',
+                      };
+                      const safe = safeHttpUrl(session.meetingUrl);
+                      return safe
+                        ? <a href={safe} target="_blank" rel="noreferrer" style={linkStyle}>{session.meetingUrl}</a>
+                        : <span style={linkStyle}>{session.meetingUrl}</span>;
+                    })()}
                     <button onClick={copyMeetingUrl} style={{
                       padding: '8px 10px', background: '#3a8dc4', border: 'none', color: '#fff',
                       borderRadius: 6, cursor: 'pointer',
@@ -3159,7 +3176,7 @@ function ConfirmBooking({ session, onBack, onDone, profile }) {
 
       <Field label="お名前"><input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} /></Field>
       <Field label="X / Twitter ID"><input value={handle} onChange={(e) => setHandle(e.target.value)} style={inputStyle} /></Field>
-      <Field label="伝言（任意）"><textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} placeholder="例：初参加です。よろしくお願いします。" /></Field>
+      <Field label="伝言（任意）"><textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={300} style={{ ...inputStyle, resize: 'vertical' }} placeholder="例：初参加です。よろしくお願いします。" /></Field>
 
       <button onClick={handleConfirm} disabled={submitting} style={{
         width: '100%', marginTop: 8, padding: 14,
@@ -3365,13 +3382,17 @@ function MyPage({ onBack }) {
                   : { bg: '#fce8e0', c: '#d97757', l: '未送金' };
                 return <span style={{ padding: '2px 8px', fontSize: 9, fontWeight: 700, borderRadius: 999, background: m.bg, color: m.c }}>● {m.l}</span>;
               })()}
-              {s.isOnline && s.meetingUrl && (
-                <a href={s.meetingUrl} target="_blank" rel="noreferrer" style={{
+              {s.isOnline && s.meetingUrl && (() => {
+                const safe = safeHttpUrl(s.meetingUrl);
+                const linkStyle = {
                   padding: '6px 10px', background: '#e6f1f9', border: '1px solid #b8d6ec',
                   color: '#3a8dc4', borderRadius: 6, fontSize: 10, fontWeight: 700,
                   textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4,
-                }}><Link2 size={10} /> 入室</a>
-              )}
+                };
+                return safe
+                  ? <a href={safe} target="_blank" rel="noreferrer" style={linkStyle}><Link2 size={10} /> 入室</a>
+                  : <span style={{ ...linkStyle, color: '#9499a8' }}><Link2 size={10} /> 無効なURL</span>;
+              })()}
             </div>
           );
         })}
@@ -3855,7 +3876,10 @@ function dowOf(dateStr) {
   return isNaN(d.getTime()) ? '' : POLL_DOW[d.getDay()];
 }
 
+const MAX_CANDIDATES = 30; // 候補日の上限（サーバーの回答キー上限60と整合）
+
 function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
+  const { push } = useToast();
   const isEdit = mode === 'edit';
   const customers = useCustomers();
 
@@ -3879,7 +3903,13 @@ function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
   const lockedCandidates = isEdit && initial?.status === 'confirmed';
 
   // 候補日の操作
-  const addCandidate = () => setCandidates(prev => [...prev, { date: '', time: '19:30-22:30' }]);
+  const addCandidate = () => setCandidates(prev => {
+    if (prev.length >= MAX_CANDIDATES) {
+      push(`候補日は最大${MAX_CANDIDATES}件までです`, 'warn');
+      return prev;
+    }
+    return [...prev, { date: '', time: '19:30-22:30' }];
+  });
   const removeCandidate = (idx) => setCandidates(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
   const updateCandidate = (idx, patch) => setCandidates(prev => prev.map((c, i) => i === idx ? { ...c, ...patch } : c));
 
@@ -3888,7 +3918,7 @@ function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
     next.has(id) ? next.delete(id) : next.add(id);
     return next;
   });
-  const filteredCustomers = customers.filter(c => !inviteSearch || c.name.includes(inviteSearch) || c.handle.includes(inviteSearch));
+  const filteredCustomers = customers.filter(c => !inviteSearch || (c.name || '').includes(inviteSearch) || (c.handle || '').includes(inviteSearch));
 
   const validCandidates = candidates.filter(c => c.date);
   const canSave = validCandidates.length >= 1 && (targetMode === 'all' || invited.size >= 1);
@@ -3928,7 +3958,7 @@ function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
       <div style={{ flex: 1, overflow: 'auto', padding: '20px 24px' }}>
         {/* タイトル */}
         <Field label="タイトル（未入力なら自動生成）">
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例: 6月 対面会の日程調整" style={inputStyle} />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={60} placeholder="例: 6月 対面会の日程調整" style={inputStyle} />
         </Field>
 
         {/* 会のタイプ */}
@@ -3996,7 +4026,7 @@ function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
               </div>
             ))}
           </div>
-          {!lockedCandidates && (
+          {!lockedCandidates && candidates.length < MAX_CANDIDATES && (
             <button onClick={addCandidate} style={{
               marginTop: 8, display: 'flex', alignItems: 'center', gap: 5, padding: '8px 14px',
               background: '#fff', border: '1px dashed #c9c4ba', color: '#6b6e7a',
@@ -4060,7 +4090,7 @@ function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
 
         {/* メモ */}
         <Field label="メモ（任意）">
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="例: 会場の都合で土日のみ。6人以上集まった日で開催します。" style={{ ...inputStyle, resize: 'vertical' }} />
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={300} placeholder="例: 会場の都合で土日のみ。6人以上集まった日で開催します。" style={{ ...inputStyle, resize: 'vertical' }} />
         </Field>
       </div>
 
@@ -4282,6 +4312,7 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm, onD
 
 // ============ 日程調整（確定ダイアログ）============
 function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
+  const { push } = useToast();
   const cd = poll.candidateDates[colIdx];
   // プラン未定なら確定時にプラン選択必須
   const [planKey, setPlanKey] = useState(poll.plan || '');
@@ -4304,6 +4335,13 @@ function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
   // 確定完了まで待ち、成功時のみモーダルを閉じる（連打・反映待ちの間の再操作を防ぐ）
   const handleConfirm = async () => {
     if (!canConfirm || submitting) return;
+    if (needsPrice) {
+      const priceNum = Number(customPrice);
+      if (!Number.isFinite(priceNum) || priceNum < 0) {
+        push('参加費は0以上の数値で入力してください', 'error');
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       const ok = await onConfirm({ planKey: planKey || null, customPrice: needsPrice ? customPrice : undefined });
@@ -4350,7 +4388,7 @@ function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
         {needsPrice && (
           <div style={{ marginBottom: 16 }}>
             <FieldLabel>参加費（必須）</FieldLabel>
-            <input type="number" value={customPrice} onChange={(e) => setCustomPrice(e.target.value)} placeholder="例: 4000" style={inputStyle} />
+            <input type="number" min={0} value={customPrice} onChange={(e) => setCustomPrice(e.target.value)} placeholder="例: 4000" style={inputStyle} />
           </div>
         )}
 
@@ -4678,6 +4716,7 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
 
 // ============ 会の新規作成・編集モーダル ============
 function SessionFormModal({ mode, initial, onSave, onClose }) {
+  const { push } = useToast();
   const isEdit = mode === 'edit';
   const initialPlan = initial?.plan || 'okiraku_zoom_10';
 
@@ -4719,11 +4758,25 @@ function SessionFormModal({ mode, initial, onSave, onClose }) {
   );
 
   const handleSave = () => {
+    // URL検証: 入力があり http/https でなければ弾く（javascript: 等のXSS防止）
+    const trimmedUrl = (meetingUrl || '').trim();
+    if (isOnline && trimmedUrl && !safeHttpUrl(trimmedUrl)) {
+      push('ミーティングURLは http:// または https:// で始まる必要があります', 'error');
+      return;
+    }
+    // 料金検証: 負数を弾く
+    if (needsCustomPrice) {
+      const priceNum = Number(customPrice);
+      if (!Number.isFinite(priceNum) || priceNum < 0) {
+        push('参加費は0以上の数値で入力してください', 'error');
+        return;
+      }
+    }
     const newSession = {
       id: isEdit ? initial.id : Date.now(),
       date, day, time, plan: planKey, gm,
       platform: platformLabel,
-      meetingUrl: isOnline ? (meetingUrl || null) : null,
+      meetingUrl: isOnline ? (trimmedUrl || null) : null,
       guestName: guestName || null,
       guestBio: guestBio || null,
       customTitle: customTitle || null,
@@ -4783,13 +4836,13 @@ function SessionFormModal({ mode, initial, onSave, onClose }) {
 
         {needsCustomTitle && (
           <Field label={plan.brand === 'event' ? 'イベント名 *' : 'クローズド会のタイトル *'}>
-            <input value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} placeholder={plan.brand === 'event' ? '5周年記念オールナイト' : 'VIP常連様限定回'} style={inputStyle} />
+            <input value={customTitle} onChange={(e) => setCustomTitle(e.target.value)} maxLength={60} placeholder={plan.brand === 'event' ? '5周年記念オールナイト' : 'VIP常連様限定回'} style={inputStyle} />
           </Field>
         )}
 
         {needsCustomPrice && (
           <Field label="参加費 *">
-            <input type="number" value={customPrice} onChange={(e) => setCustomPrice(e.target.value)} placeholder="例: 4000" style={inputStyle} />
+            <input type="number" min={0} value={customPrice} onChange={(e) => setCustomPrice(e.target.value)} placeholder="例: 4000" style={inputStyle} />
           </Field>
         )}
 
@@ -4825,10 +4878,10 @@ function SessionFormModal({ mode, initial, onSave, onClose }) {
         {(plan.brand === 'okiraku' && plan.label.includes('ゲスト')) || plan.brand === 'stepup' ? (
           <>
             <Field label="ゲスト名">
-              <input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="例: 狼月 シン" style={inputStyle} />
+              <input value={guestName} onChange={(e) => setGuestName(e.target.value)} maxLength={40} placeholder="例: 狼月 シン" style={inputStyle} />
             </Field>
             <Field label="ゲスト紹介文">
-              <textarea value={guestBio} onChange={(e) => setGuestBio(e.target.value)} rows={2} placeholder="例: 人狼歴12年・配信総視聴30万超のレジェンド" style={{ ...inputStyle, resize: 'vertical' }} />
+              <textarea value={guestBio} onChange={(e) => setGuestBio(e.target.value)} rows={2} maxLength={300} placeholder="例: 人狼歴12年・配信総視聴30万超のレジェンド" style={{ ...inputStyle, resize: 'vertical' }} />
             </Field>
           </>
         ) : null}
@@ -4891,7 +4944,7 @@ function ClosedInviteModal({ session, updateSession, onClose }) {
   const toast = useToast();
 
   const filteredCustomers = customers.filter(c =>
-    !search || c.name.includes(search) || c.handle.includes(search)
+    !search || (c.name || '').includes(search) || (c.handle || '').includes(search)
   );
 
   const toggle = (id) => {
@@ -5872,7 +5925,7 @@ function CustomersAdmin({ onSelect }) {
 
   const list = useMemo(() => customers.filter(c =>
     (tier === 'all' || c.tier === tier) &&
-    (q === '' || c.name.includes(q) || c.handle.includes(q))
+    (q === '' || (c.name || '').includes(q) || (c.handle || '').includes(q))
   ), [q, tier, customers]);
 
   return (

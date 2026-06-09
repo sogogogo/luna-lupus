@@ -541,7 +541,21 @@ export default function App() {
 function AppInner() {
   const toast = useToast();
   const { user, isAdmin, loading: authLoading } = useAuth();
-  const [view, setView] = useState('customer');
+  // URLパスで画面を分離：/ = 参加者画面、/admin = 管理画面。
+  // 重いルーターは導入せず window.location.pathname を軽く分岐（判定は実質1箇所）。
+  // 参加者には管理画面の存在を一切見せないため、ルート(/)には管理導線を出さない。
+  const [path, setPath] = useState(() => window.location.pathname);
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  // アプリ内遷移（リロードなし）。ブラウザ履歴も更新するので戻る/進むが効く。
+  const navigate = (to) => {
+    if (window.location.pathname !== to) window.history.pushState({}, '', to);
+    setPath(to);
+  };
+  const isAdminRoute = path === '/admin' || path.startsWith('/admin/');
   const [sessions, setSessions] = useState([]);              // Firestore から読み込む（DB移行: sessions）
   const [sessionsLoading, setSessionsLoading] = useState(true);
   const [participants, setParticipants] = useState([]);      // Firestore から読み込む（DB移行: participants）
@@ -612,12 +626,12 @@ function AppInner() {
 
   // ブランドに応じたページ全体の背景
   const pageBg = useMemo(() => {
-    if (view === 'admin' || brandFilter === 'all') return '#fbfaf7';
+    if (isAdminRoute || brandFilter === 'all') return '#fbfaf7';
     if (brandFilter === 'okiraku') return BRAND.okiraku.softer; // ほのかな水色
     if (brandFilter === 'stepup') return BRAND.stepup.softer;   // ほのかな紫
     if (brandFilter === 'taimen') return BRAND.taimen.softer;   // ほのかなグレー
     return '#fbfaf7';
-  }, [view, brandFilter]);
+  }, [isAdminRoute, brandFilter]);
 
   return (
     <div style={{
@@ -652,7 +666,7 @@ function AppInner() {
       <div style={{
         position: 'fixed', top: 0, left: 0, right: 0, height: 6, zIndex: 60,
         background:
-          view === 'admin' || brandFilter === 'all'
+          isAdminRoute || brandFilter === 'all'
             ? 'linear-gradient(90deg, #5b9bd5 0%, #f5c542 35%, #6b5dc7 70%, #3fb8d4 100%)'
             : `linear-gradient(90deg, ${BRAND[brandFilter].primary} 0%, ${BRAND[brandFilter].accent} 100%)`,
         transition: 'background 0.6s ease',
@@ -668,7 +682,7 @@ function AppInner() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ display: 'flex', gap: -4, marginRight: 6 }}>
             <img
-              src={brandFilter === 'stepup' && view === 'customer' ? ICON_STEPUP : ICON_OKIRAKU}
+              src={brandFilter === 'stepup' && !isAdminRoute ? ICON_STEPUP : ICON_OKIRAKU}
               alt=""
               style={{ width: 36, height: 36, objectFit: 'contain', transition: 'opacity 0.4s' }}
             />
@@ -684,31 +698,32 @@ function AppInner() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* 参加者/管理者トグルは運営者(isAdmin)ログイン時のみ表示。
-              参加者・未ログイン・Google参加者には管理画面の存在自体を見せない。
-              運営者は参加者画面フッターの「運営者ログイン」からログイン → isAdmin判明でトグル出現。 */}
-          {isAdmin && (
-          <div style={{
-            display: 'flex',
-            background: '#f0eee8',
-            borderRadius: 999,
-            padding: 3,
-          }}>
-            {['customer', 'admin'].map(v => (
-              <button key={v} onClick={() => setView(v)} style={{
-                padding: '7px 18px', borderRadius: 999, border: 'none', cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
-                background: view === v ? '#2c3140' : 'transparent',
-                color: view === v ? '#fff' : '#6b6e7a',
-                transition: 'all 0.2s',
-              }}>
-                {v === 'customer' ? '参加者' : '管理者'}
-              </button>
-            ))}
-          </div>
+          {/* 画面間の移動は URL ベース。導線は運営者(isAdmin)にしか出さないので、
+              参加者・未ログイン・Google参加者には管理画面の存在が一切見えない。 */}
+          {/* 管理画面(/admin)で運営者ログイン中: 参加者画面プレビューへの導線 */}
+          {isAdminRoute && isAdmin && (
+            <button onClick={() => navigate('/')} style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '7px 12px', background: '#fff', border: '1px solid #e0ddd6',
+              borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit',
+              fontSize: 11, fontWeight: 700, color: '#6b6e7a',
+            }} title="参加者から見える画面を確認">
+              <Eye size={13} /> 参加者画面を見る
+            </button>
           )}
-          {/* ログアウト（管理者ログイン中のみ） */}
-          {view === 'admin' && user && (
+          {/* 参加者画面(/)を運営者が見ているとき: 管理画面へ戻る導線（isAdmin限定＝参加者には絶対出ない） */}
+          {!isAdminRoute && isAdmin && (
+            <button onClick={() => navigate('/admin')} style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              padding: '7px 12px', background: '#2c3140', border: 'none',
+              borderRadius: 999, cursor: 'pointer', fontFamily: 'inherit',
+              fontSize: 11, fontWeight: 700, color: '#fff',
+            }} title="管理画面に戻る">
+              <LayoutGrid size={13} /> 管理画面へ戻る
+            </button>
+          )}
+          {/* ログアウト（管理画面でログイン中のみ） */}
+          {isAdminRoute && user && (
             <button onClick={async () => { await signOutUser(); toast.push('ログアウトしました', 'info'); }} style={{
               display: 'flex', alignItems: 'center', gap: 5,
               padding: '7px 12px', background: '#fff', border: '1px solid #e0ddd6',
@@ -722,36 +737,19 @@ function AppInner() {
       </header>
 
       <main>
-        {view === 'admin'
+        {isAdminRoute
           ? (authLoading
               ? <SessionsLoading label="認証情報を確認しています…" sub="ログイン状態を確認中" />
               : !user
-              ? <LoginScreen onBack={() => setView('customer')} />
+              ? <LoginScreen onBack={() => navigate('/')} />
               : !isAdmin
-              ? <AdminNoPermission onBack={() => setView('customer')} />
+              ? <AdminNoPermission onBack={() => navigate('/')} />
               : sessionsLoading
               ? <SessionsLoading />
               : <AdminView sessions={sessions} participants={participants} updateParticipant={updateParticipant} updateSession={updateSession} addSession={addSession} deleteSession={deleteSession} schedulePolls={schedulePolls} pollResponses={pollResponses} addSchedulePoll={addSchedulePoll} updateSchedulePoll={updateSchedulePoll} deleteSchedulePoll={deleteSchedulePoll} announceHistory={announceHistory} addAnnounce={addAnnounce} />)
           : <CustomerView brandFilter={brandFilter} setBrandFilter={setBrandFilter} />
         }
       </main>
-
-      {/* 控えめな運営者ログイン入口（参加者画面・非運営者のみ）。
-          ここから view='admin' → 未ログインなら LoginScreen が出る。運営者の管理画面への唯一の動線。 */}
-      {view === 'customer' && !isAdmin && (
-        <footer style={{
-          maxWidth: 1080, margin: '0 auto', padding: '0 28px 48px',
-          textAlign: 'center',
-        }}>
-          <button onClick={() => setView('admin')} style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            fontFamily: 'inherit', fontSize: 11, color: '#b0ada5', fontWeight: 600,
-            display: 'inline-flex', alignItems: 'center', gap: 5, padding: 6,
-          }} title="運営者の方はこちらからログイン">
-            <Lock size={11} /> 運営者ログイン
-          </button>
-        </footer>
-      )}
     </div>
   );
 }

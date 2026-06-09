@@ -1,7 +1,7 @@
 import React, { useState, useMemo, createContext, useContext, useEffect, useRef } from 'react';
 import {
   Calendar, Users, CreditCard, ChevronRight, ChevronLeft, Check, Clock, Sparkles, AlertCircle,
-  TrendingUp, User, Phone, Mail, Search, X, ArrowLeft, QrCode, Wallet, Video, Star,
+  TrendingUp, User, Phone, Mail, Search, X, ArrowLeft, Wallet, Video, Star,
   Megaphone, Shuffle, Eye, EyeOff, Send, Copy, RotateCcw, XCircle, CheckCircle2,
   AlertTriangle, Bell, Hash, MessageCircle, Link2, Zap, MapPin, Lock, UserCheck, Plus,
   List, LayoutGrid, CalendarDays, ListChecks, LogOut,
@@ -1147,7 +1147,7 @@ function CustomerView({ brandFilter, setBrandFilter }) {
   );
   if (step === 'mypage')   return <MyPage onBack={() => setStep('list')} />;
   if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => { refresh(); refreshPublic(); setStep('done'); }} profile={profile} />;
-  if (step === 'done' && selected)    return <BookingDone session={selected} onHome={() => { setStep('list'); setSelected(null); }} />;
+  if (step === 'done' && selected)    return <BookingDone session={selected} onHome={() => { setStep('list'); setSelected(null); }} onPay={() => setStep('detail')} />;
   if (step === 'detail' && selected)  return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => { if (!isLoggedIn) { toast.push('予約にはログインが必要です（上部のGoogleログイン）', 'warn'); return; } setStep('confirm'); }} myParticipant={getMyParticipant(selected.id)} cancelBooking={async (pid) => { await cancelReservation({ participantId: pid }); refresh(); refreshPublic(); }} reportBooking={async (pid) => { await reportPayment({ participantId: pid }); refresh(); }} />;
 
   // 公開情報の取得中／失敗（一覧表示前のガード）
@@ -3025,7 +3025,6 @@ function CancelSection({ session, myParticipant, cancelBooking }) {
 
 // ============ 予約フォーム / PayPay ============
 function ConfirmBooking({ session, onBack, onDone, profile }) {
-  const [step, setStep] = useState('form');
   // 氏名・ハンドルは本人プロフィール（表示用。サーバー側でも本人レコードを使う）
   const [name, setName] = useState(profile?.name || '');
   const [handle, setHandle] = useState(profile?.handle || '');
@@ -3034,60 +3033,20 @@ function ConfirmBooking({ session, onBack, onDone, profile }) {
   const toast = useToast();
   const b = session.brand;
 
-  const handlePaymentDone = async () => {
+  // 予約確定（レベル2：ここでは予約のみ。送金は予約後 PaymentStatus の PayPay ID 案内から申告する）
+  const handleConfirm = async () => {
     if (submitting) return;
     setSubmitting(true);
     try {
       // 予約は Cloud Functions 窓口経由（定員チェック等はサーバー側）。入金は運営者が確認
       await bookSession({ sessionId: session.id, note });
-      toast.push('予約を受け付けました。お支払いは運営の確認後に反映されます。', 'success');
+      toast.push('予約を受け付けました。続けてお支払い方法をご確認ください。', 'success');
       onDone();
     } catch (e) {
       toast.push(e.message || '予約に失敗しました。時間をおいて再度お試しください。', 'error');
       setSubmitting(false);
     }
   };
-
-  if (step === 'pay') {
-    return (
-      <div className="fadeup" style={{ maxWidth: 460, margin: '0 auto', padding: '40px 28px 80px' }}>
-        <h2 className="maru" style={{ fontSize: 22, fontWeight: 900, color: '#2c3140', textAlign: 'center', marginBottom: 6 }}>お支払い</h2>
-        <p style={{ textAlign: 'center', fontSize: 12, color: '#6b6e7a', marginBottom: 28 }}>
-          PayPay で支払いを完了してください
-        </p>
-        <div style={{
-          background: '#fff', padding: 28, borderRadius: 14, textAlign: 'center',
-          border: '1px solid #e8e5dd', boxShadow: '0 4px 20px rgba(0,0,0,0.04)',
-        }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', background: '#ff0033', color: '#fff', borderRadius: 6, marginBottom: 22, fontSize: 13, fontWeight: 700 }}>
-            <Wallet size={14} /> PayPay
-          </div>
-          <div style={{
-            width: 180, height: 180, margin: '0 auto', background: '#000',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4,
-          }}>
-            <QrCode size={150} color="#fff" strokeWidth={1} />
-          </div>
-          <div className="num" style={{ fontSize: 30, color: '#2c3140', marginTop: 22, fontWeight: 700 }}>
-            {fmtYen(session.price)}
-          </div>
-          <div style={{ fontSize: 11, color: '#9499a8', marginTop: 4 }}>{session.title} 参加費</div>
-        </div>
-        <button onClick={handlePaymentDone} style={{
-          width: '100%', marginTop: 20, padding: 13,
-          background: `linear-gradient(135deg, ${b.primary}, ${b.accent})`,
-          color: '#fff', border: 'none', borderRadius: 10,
-          fontFamily: 'inherit', fontWeight: 700, fontSize: 13, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-          boxShadow: `0 4px 14px ${b.primary}33`,
-        }}><Check size={14} /> 支払い完了</button>
-        <button onClick={() => setStep('form')} style={{
-          width: '100%', marginTop: 8, padding: 11, background: 'transparent',
-          color: '#6b6e7a', border: 'none', fontFamily: 'inherit', fontSize: 11, cursor: 'pointer',
-        }}>戻る</button>
-      </div>
-    );
-  }
 
   return (
     <div className="fadeup" style={{ maxWidth: 540, margin: '0 auto', padding: '32px 28px 80px' }}>
@@ -3110,14 +3069,17 @@ function ConfirmBooking({ session, onBack, onDone, profile }) {
       <Field label="X / Twitter ID"><input value={handle} onChange={(e) => setHandle(e.target.value)} style={inputStyle} /></Field>
       <Field label="伝言（任意）"><textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} placeholder="例：初参加です。よろしくお願いします。" /></Field>
 
-      <button onClick={() => setStep('pay')} style={{
+      <button onClick={handleConfirm} disabled={submitting} style={{
         width: '100%', marginTop: 8, padding: 14,
-        background: `linear-gradient(135deg, ${b.primary}, ${b.accent})`,
+        background: submitting ? '#cfcabf' : `linear-gradient(135deg, ${b.primary}, ${b.accent})`,
         color: '#fff', border: 'none', borderRadius: 10,
         fontFamily: 'inherit', fontWeight: 700, fontSize: 13,
-        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-        boxShadow: `0 4px 14px ${b.primary}33`,
-      }}>PayPayで支払いに進む <ChevronRight size={16} /></button>
+        cursor: submitting ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        boxShadow: submitting ? 'none' : `0 4px 14px ${b.primary}33`,
+      }}>{submitting ? '予約中…' : <>この内容で予約する <ChevronRight size={16} /></>}</button>
+      <p style={{ textAlign: 'center', fontSize: 11, color: '#9499a8', marginTop: 10, lineHeight: 1.7 }}>
+        ※お支払いは予約後に PayPay でお願いします（次の画面でご案内します）
+      </p>
     </div>
   );
 }
@@ -3138,7 +3100,8 @@ function Field({ label, children }) {
   );
 }
 
-function BookingDone({ session, onHome }) {
+function BookingDone({ session, onHome, onPay }) {
+  const b = session.brand || BRAND.okiraku;
   return (
     <div className="fadeup" style={{ maxWidth: 480, margin: '0 auto', padding: '60px 28px 80px', textAlign: 'center' }}>
       <div style={{
@@ -3150,25 +3113,42 @@ function BookingDone({ session, onHome }) {
       <h2 className="maru" style={{ fontSize: 24, fontWeight: 900, color: '#2c3140', marginBottom: 10 }}>
         予約完了！
       </h2>
-      <p style={{ fontSize: 13, color: '#6b6e7a', lineHeight: 1.9, marginBottom: 28 }}>
+      <p style={{ fontSize: 13, color: '#6b6e7a', lineHeight: 1.9, marginBottom: 22 }}>
         {session.date}（{session.day}）{session.time}<br />
         {session.title} の予約が確定しました。<br />
         <span style={{ color: '#9499a8', fontSize: 11 }}>当日、{session.venue} にてお待ちしています。</span>
       </p>
-      <button onClick={onHome} style={{
-        padding: '13px 28px',
-        background: `linear-gradient(135deg, ${BRAND.okiraku.primary}, ${BRAND.okiraku.accent})`,
+
+      {/* 送金導線への案内（レベル2：予約後に PaymentStatus で PayPay ID 確認 → 送金 → 申告） */}
+      <div style={{
+        textAlign: 'left', background: '#fff5f6', border: '1px solid rgba(255,0,51,0.2)',
+        borderRadius: 12, padding: '14px 16px', marginBottom: 24,
+        display: 'flex', gap: 10, alignItems: 'flex-start',
+      }}>
+        <Wallet size={16} color="#ff0033" style={{ flexShrink: 0, marginTop: 2 }} />
+        <div style={{ fontSize: 12, color: '#6b6e7a', lineHeight: 1.7 }}>
+          続いて <span style={{ fontWeight: 700, color: '#2c3140' }}>PayPay でのお支払い</span> をお願いします。<br />
+          下の「お支払いに進む」から、送金先の PayPay ID と手順をご確認ください。
+        </div>
+      </div>
+
+      <button onClick={onPay} style={{
+        width: '100%', padding: '13px 28px', marginBottom: 10,
+        background: `linear-gradient(135deg, ${b.primary}, ${b.accent})`,
         color: '#fff', border: 'none', borderRadius: 12,
-        cursor: 'pointer', fontFamily: 'inherit',
-        fontSize: 14, fontWeight: 700,
-        display: 'inline-flex', alignItems: 'center', gap: 8,
-        boxShadow: `0 4px 16px ${BRAND.okiraku.primary}33`,
-        transition: 'all 0.15s',
-      }}
-        onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 6px 20px ${BRAND.okiraku.primary}55`; }}
-        onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = `0 4px 16px ${BRAND.okiraku.primary}33`; }}
-      >
-        <ArrowLeft size={16} strokeWidth={2.5} /> ホームに戻る
+        cursor: 'pointer', fontFamily: 'inherit', fontSize: 14, fontWeight: 700,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        boxShadow: `0 4px 16px ${b.primary}33`,
+      }}>
+        <Wallet size={16} strokeWidth={2.5} /> お支払いに進む
+      </button>
+      <button onClick={onHome} style={{
+        width: '100%', padding: '11px 28px', background: 'transparent',
+        color: '#6b6e7a', border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+        fontSize: 12, fontWeight: 600,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+      }}>
+        <ArrowLeft size={14} /> あとで（ホームに戻る）
       </button>
     </div>
   );

@@ -2852,55 +2852,83 @@ function PaymentStatus({ status, price, onReport }) {
   };
   return (
     <div style={{ padding: 16, marginBottom: 12, borderRadius: 10, background: '#fff', border: '1px solid #f5c5b6' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <AlertCircle size={16} color="#d97757" />
-        <div style={{ fontSize: 12, color: '#d97757', fontWeight: 700 }}>未送金</div>
+      {/* 見出し ＋ 金額（金額はここで1回だけ表示） */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div className="maru" style={{ fontSize: 14, fontWeight: 900, color: '#2c3140', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Wallet size={16} color="#ff0033" /> PayPayでお支払い
+        </div>
+        <div className="num" style={{ fontSize: 22, fontWeight: 700, color: '#2c3140', whiteSpace: 'nowrap' }}>{fmtYen(price)}</div>
       </div>
-      {/* PayPay 送金先（PayPay ID 案内方式。個人マイコードQRは期限切れするため不採用） */}
-      <div style={{ marginBottom: 12 }}>
-        <div className="maru" style={{ fontSize: 13, fontWeight: 900, color: '#2c3140', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-          <Wallet size={15} color="#ff0033" /> PayPayでお支払い
-        </div>
-        <div style={{ fontSize: 11, color: '#6b6e7a', marginBottom: 10, lineHeight: 1.6 }}>
-          下記の PayPay ID あてにお送りください。
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, marginBottom: 16 }}>
+        <AlertCircle size={12} color="#d97757" />
+        <span style={{ fontSize: 11, color: '#d97757', fontWeight: 700 }}>未送金</span>
+        <span style={{ fontSize: 10, color: '#9499a8' }}>· 下記3ステップでお支払いください</span>
+      </div>
 
-        {/* PayPay ID（コピーしやすく目立つ表示） */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: '#fff5f6', border: '1px solid rgba(255,0,51,0.2)', borderRadius: 10, marginBottom: 10 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 9, color: '#9499a8', marginBottom: 2, letterSpacing: '0.04em' }}>PayPay ID</div>
-            <div className="num" style={{ fontSize: 20, fontWeight: 700, color: '#2c3140', letterSpacing: '0.02em' }}>{PAYPAY_ID}</div>
+      {/* 3ステップ（コピー → 送金 → 申告。手順と申告ボタンを同じ流れに） */}
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {/* STEP 1: 送金先IDをコピー */}
+        <PaymentStep n={1} title="送金先IDをコピー">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', background: '#fff5f6', border: '1px solid rgba(255,0,51,0.18)', borderRadius: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 9, color: '#9499a8', marginBottom: 1, letterSpacing: '0.04em' }}>PayPay ID</div>
+              <div className="num" style={{ fontSize: 19, fontWeight: 700, color: '#2c3140' }}>{PAYPAY_ID}</div>
+            </div>
+            {/* コピー＝控えめ（アウトライン）。主役は STEP 3 の申告ボタン */}
+            <button onClick={handleCopy} style={{
+              display: 'flex', alignItems: 'center', gap: 5, padding: '8px 13px', flexShrink: 0,
+              background: '#fff', color: copied ? '#3a8c5b' : '#2c3140',
+              border: `1px solid ${copied ? '#9cd0b0' : '#d4d0c8'}`, borderRadius: 8,
+              cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
+            }} title="PayPay IDをコピー">
+              {copied ? <><Check size={13} /> コピー済み</> : <><Copy size={13} /> コピー</>}
+            </button>
           </div>
-          <button onClick={handleCopy} style={{
-            display: 'flex', alignItems: 'center', gap: 5, padding: '9px 13px', flexShrink: 0,
-            background: copied ? '#3a8c5b' : '#ff0033', color: '#fff', border: 'none', borderRadius: 8,
-            cursor: 'pointer', fontFamily: 'inherit', fontSize: 11, fontWeight: 700, transition: 'background 0.2s',
-          }} title="PayPay IDをコピー">
-            {copied ? <><Check size={13} /> コピー済み</> : <><Copy size={13} /> コピー</>}
+        </PaymentStep>
+
+        {/* STEP 2: PayPayアプリで送金 */}
+        <PaymentStep n={2} title="PayPayアプリで送金">
+          <div style={{ fontSize: 12, color: '#6b6e7a', lineHeight: 1.75 }}>
+            「送る」→ コピーしたIDを貼り付け → 上記の参加費を送金してください。
+          </div>
+        </PaymentStep>
+
+        {/* STEP 3: 送金したら申告（主アクションの申告ボタンをこのステップ内に） */}
+        <PaymentStep n={3} title="送金したら申告" last>
+          <div style={{ fontSize: 12, color: '#6b6e7a', lineHeight: 1.75, marginBottom: 10 }}>
+            送金が終わったら下のボタンで運営にお知らせください。運営が入金を確認します。
+          </div>
+          <button onClick={handleReport} disabled={reporting} style={{
+            width: '100%', padding: 13, background: reporting ? '#e0ddd6' : '#ff0033', color: '#fff',
+            border: 'none', borderRadius: 10, cursor: reporting ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            boxShadow: reporting ? 'none' : '0 2px 10px rgba(255,0,51,0.25)',
+          }}>
+            <Wallet size={14} /> {reporting ? '申告中…' : 'PayPayで送金しました（申告）'}
           </button>
-        </div>
-
-        {/* 送金額 */}
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-          <span style={{ fontSize: 10, color: '#9499a8' }}>送金額</span>
-          <span className="num" style={{ fontSize: 22, fontWeight: 700, color: '#2c3140' }}>{fmtYen(price)}</span>
-        </div>
-
-        {/* 送金手順（レベル2フロー：送金→金額を自己申告→運営者が確認） */}
-        <ol style={{ margin: 0, padding: '10px 12px', listStyle: 'none', background: '#faf9f6', border: '1px solid #e8e5dd', borderRadius: 10, fontSize: 11, color: '#6b6e7a', lineHeight: 2 }}>
-          <li>① PayPayアプリで「送る」を開く</li>
-          <li>② ID「<span style={{ fontWeight: 700, color: '#2c3140' }}>{PAYPAY_ID}</span>」を検索</li>
-          <li>③ 参加費 <span style={{ fontWeight: 700, color: '#2c3140' }}>{fmtYen(price)}</span> を送金</li>
-          <li>④ 下の「送金しました」で金額を申告</li>
-        </ol>
+        </PaymentStep>
       </div>
-      <button onClick={handleReport} disabled={reporting} style={{
-        width: '100%', padding: 11, background: reporting ? '#e0ddd6' : '#ff0033', color: '#fff',
-        border: 'none', borderRadius: 8, cursor: reporting ? 'default' : 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-      }}>
-        <Wallet size={13} /> {reporting ? '申告中…' : 'PayPayで送金しました（申告）'}
-      </button>
+    </div>
+  );
+}
+
+// PayPay 支払い案内の各ステップ（番号バッジ＋縦コネクタで流れを視覚化。装飾は最小限）
+function PaymentStep({ n, title, last, children }) {
+  return (
+    <div style={{ display: 'flex', gap: 11, alignItems: 'stretch' }}>
+      {/* 左：番号バッジ ＋（最後以外は）縦線でステップを繋ぐ */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+        <div className="num" style={{
+          width: 24, height: 24, borderRadius: '50%', background: '#ff0033', color: '#fff',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700,
+        }}>{n}</div>
+        {!last && <div style={{ flex: 1, width: 2, background: '#f0d9dd', marginTop: 4, minHeight: 14 }} />}
+      </div>
+      {/* 右：タイトル＋内容 */}
+      <div style={{ flex: 1, minWidth: 0, paddingBottom: last ? 0 : 16 }}>
+        <div className="maru" style={{ fontSize: 13, fontWeight: 900, color: '#2c3140', marginBottom: 7 }}>{title}</div>
+        {children}
+      </div>
     </div>
   );
 }

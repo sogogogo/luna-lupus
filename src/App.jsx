@@ -9,9 +9,9 @@ import {
 import { signIn, signInWithGoogle, signOutUser, onAuthChange } from './lib/auth';
 import { claimProfile, fetchPublicData, fetchMyData, bookSession, cancelReservation, reportPayment, updateMyProfile, answerPoll } from './lib/functions';
 import {
-  subscribeSessions, saveSession, patchSession, removeSession, seedSessions,
+  subscribeSessions, saveSession, patchSession, removeSessionWithParticipants, seedSessions,
   subscribeCustomers, seedCustomers,
-  subscribeParticipants, patchParticipant, removeParticipant, seedParticipants,
+  subscribeParticipants, patchParticipant, seedParticipants,
   subscribeSchedulePolls, saveSchedulePoll, patchSchedulePoll, removeSchedulePoll, seedSchedulePolls,
   subscribePollResponses, removePollResponse, seedPollResponses,
   subscribeAnnouncements, addAnnouncement, seedAnnouncements,
@@ -258,17 +258,19 @@ const SCHEDULE_POLLS_INIT = [
 
 // pollResponses: 各参加者の回答。answers のキーは対応する poll の candidateDates の添字(0,1,2...)、
 //   値は 'yes'（◯参加可）/ 'maybe'（△調整可）/ 'no'（×不可）
+// 回答ドキュメントの id は決定論的に `${pollId}_${customerId}`（同一人物の再回答は同じ id に upsert）。
+// submitPollResponse もこの規則で書き込む（全件クエリ不要＝大量同時回答でも競合しにくい）。
 const POLL_RESPONSES_INIT = [
   // poll1（6月 対面会）
-  { id: 'res1', pollId: 'poll1', customerId: 1, name: '佐藤 健',     handle: '@takeru_jinrou', answers: { 0: 'yes',   1: 'maybe', 2: 'no'    }, comment: '13日が第一希望です', respondedAt: '2026-05-29 09:12' },
-  { id: 'res2', pollId: 'poll1', customerId: 4, name: '高橋 由美',   handle: '@yumi_taka',     answers: { 0: 'yes',   1: 'yes',   2: 'maybe' }, comment: '',                   respondedAt: '2026-05-29 13:40' },
-  { id: 'res3', pollId: 'poll1', customerId: 7, name: '山本 龍之介', handle: '@ryu_yama',      answers: { 0: 'no',    1: 'yes',   2: 'yes'   }, comment: '13日は仕事です',     respondedAt: '2026-05-30 21:05' },
+  { id: 'poll1_1', pollId: 'poll1', customerId: 1, name: '佐藤 健',     handle: '@takeru_jinrou', answers: { 0: 'yes',   1: 'maybe', 2: 'no'    }, comment: '13日が第一希望です', respondedAt: '2026-05-29 09:12' },
+  { id: 'poll1_4', pollId: 'poll1', customerId: 4, name: '高橋 由美',   handle: '@yumi_taka',     answers: { 0: 'yes',   1: 'yes',   2: 'maybe' }, comment: '',                   respondedAt: '2026-05-29 13:40' },
+  { id: 'poll1_7', pollId: 'poll1', customerId: 7, name: '山本 龍之介', handle: '@ryu_yama',      answers: { 0: 'no',    1: 'yes',   2: 'yes'   }, comment: '13日は仕事です',     respondedAt: '2026-05-30 21:05' },
   // poll2（お気楽14人村）
-  { id: 'res4', pollId: 'poll2', customerId: 2, name: '鈴木 美咲',   handle: '@misaki_wolf',   answers: { 0: 'maybe', 1: 'yes'              }, comment: '金曜なら確実です',   respondedAt: '2026-05-31 08:20' },
-  { id: 'res5', pollId: 'poll2', customerId: 5, name: '伊藤 大輔',   handle: '@daisuke_i',     answers: { 0: 'yes',   1: 'yes'              }, comment: '',                   respondedAt: '2026-05-31 18:55' },
+  { id: 'poll2_2', pollId: 'poll2', customerId: 2, name: '鈴木 美咲',   handle: '@misaki_wolf',   answers: { 0: 'maybe', 1: 'yes'              }, comment: '金曜なら確実です',   respondedAt: '2026-05-31 08:20' },
+  { id: 'poll2_5', pollId: 'poll2', customerId: 5, name: '伊藤 大輔',   handle: '@daisuke_i',     answers: { 0: 'yes',   1: 'yes'              }, comment: '',                   respondedAt: '2026-05-31 18:55' },
   // poll3（クローズド・確定済み）
-  { id: 'res6', pollId: 'poll3', customerId: 1, name: '佐藤 健',     handle: '@takeru_jinrou', answers: { 0: 'yes',   1: 'maybe'            }, comment: '',                   respondedAt: '2026-05-27 10:00' },
-  { id: 'res7', pollId: 'poll3', customerId: 4, name: '高橋 由美',   handle: '@yumi_taka',     answers: { 0: 'yes',   1: 'yes'              }, comment: 'どちらも参加できます', respondedAt: '2026-05-27 12:30' },
+  { id: 'poll3_1', pollId: 'poll3', customerId: 1, name: '佐藤 健',     handle: '@takeru_jinrou', answers: { 0: 'yes',   1: 'maybe'            }, comment: '',                   respondedAt: '2026-05-27 10:00' },
+  { id: 'poll3_4', pollId: 'poll3', customerId: 4, name: '高橋 由美',   handle: '@yumi_taka',     answers: { 0: 'yes',   1: 'yes'              }, comment: 'どちらも参加できます', respondedAt: '2026-05-27 12:30' },
 ];
 
 // 告知センターの配信履歴（AppInner で state 化し、日程確定などから自動追記する）
@@ -644,11 +646,9 @@ function AppInner() {
     saveSession(newSession).catch(() => toast.push('会の作成に失敗しました', 'error'));
   };
   const deleteSession = (id) => {
-    removeSession(id).catch(() => toast.push('会の削除に失敗しました', 'error'));
-    // 紐づく参加者も Firestore から削除（ローカル participants から該当を抽出）
-    participants.filter(p => p.sessionId === id).forEach(p =>
-      removeParticipant(p.id).catch(() => {}),
-    );
+    // #3-B 会＋紐づく参加者を1バッチで原子的に削除（孤児participant防止）。
+    // 削除直前に最新の participants をクエリし直すため、ローカルstate未反映の直近予約も拾える。
+    removeSessionWithParticipants(id).catch(() => toast.push('会の削除に失敗しました', 'error'));
   };
   // 日程調整のミューテータ（Firestore へ書き込み・反映は onSnapshot）
   const addSchedulePoll = (newPoll) => {
@@ -3661,10 +3661,11 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
   // 候補日を確定 → 会作成・◯回答者を参加者登録・ポール更新 を「1つの writeBatch」で原子的に。
   // 全部成功か全部失敗か（中途半端な状態・会の二重作成を防止）。告知は非クリティカルでバッチ外。
   const confirmPoll = async (poll, colIdx, opts = {}) => {
-    // 二重確定ガード：既に確定済みなら何もしない
+    // 二重確定ガード（フロント先回り）：既に確定済みなら何もしない。
+    // ※最終防衛は commitPollConfirmation の tx内 status チェック（DBレベル）。戻り値 true/false で成否を返す。
     if (poll.status === 'confirmed') {
       toast.push('この日程調整は既に確定済みです', 'warn');
-      return;
+      return false;
     }
 
     const cd = poll.candidateDates[colIdx];
@@ -3679,7 +3680,8 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
     // （「〇〇の日程調整」という調整向けタイトルが通常会の名前に化けるのを防ぐ）
     const carryTitle = brandKey === 'event' || brandKey === 'closed';
 
-    const sessionId = Date.now();
+    // 決定論的ID：pollId 由来にして、万一2回走っても同じ会IDに上書き＝二重作成しない（冪等）
+    const sessionId = `s_${poll.id}`;
     const newSession = {
       id: sessionId,
       date: cd.date, day: cd.day, time: cd.time,
@@ -3707,16 +3709,21 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
     }));
 
     try {
-      // 会作成＋参加者登録＋ポール更新を原子的にコミット
+      // 会作成＋参加者登録＋ポール更新を1トランザクションで原子的にコミット（tx内で二重確定を弾く）
       await commitPollConfirmation({
         session: newSession,
         participants: newParticipants,
         pollId: poll.id,
         pollPatch: { status: 'confirmed', confirmedIndex: colIdx, plan: planKey, brand: brandKey },
       });
-    } catch {
-      toast.push('確定に失敗しました。時間をおいて再度お試しください。', 'error');
-      return; // 失敗時はバッチ全体が未反映＝不整合なし。告知も出さない
+    } catch (e) {
+      // tx全体が未反映＝不整合なし。二重確定（並行/別タブ）は専用メッセージに
+      if (e?.message === 'already-confirmed') {
+        toast.push('この日程調整は既に確定済みです', 'warn');
+      } else {
+        toast.push('確定に失敗しました。時間をおいて再度お試しください。', 'error');
+      }
+      return false;
     }
 
     // 告知センター履歴（非クリティカル。失敗してもログのみで確定自体は成立済み）
@@ -3727,6 +3734,7 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
     });
 
     toast.push(`日程を確定し、参加者 ${newParticipants.length} 名を登録しました`, 'success');
+    return true;
   };
 
   // selected は schedulePolls の最新を参照（将来の確定操作で内容が変わっても追従）
@@ -4264,7 +4272,7 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm, onD
           poll={poll}
           colIdx={confirmingIndex}
           pollResponses={pollResponses}
-          onConfirm={(opts) => { onConfirm?.(confirmingIndex, opts); setConfirmingIndex(null); }}
+          onConfirm={(opts) => onConfirm?.(confirmingIndex, opts)}
           onClose={() => setConfirmingIndex(null)}
         />
       )}
@@ -4283,6 +4291,7 @@ function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
   const needsPlan = !poll.plan; // 元々未定だった場合のみ選択UIを出す
   const needsPrice = plan ? plan.price === null : false;
   const [customPrice, setCustomPrice] = useState(poll.customPrice ?? '');
+  const [submitting, setSubmitting] = useState(false); // 確定処理中の二重実行防止
 
   // この候補日に対する回答内訳
   const responses = pollResponses.filter(r => r.pollId === poll.id);
@@ -4290,11 +4299,19 @@ function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
   const yesN = countBy('yes'), maybeN = countBy('maybe'), noN = countBy('no');
 
   const planLabel = plan ? plan.label : poll.title;
-  const canConfirm = (!needsPlan || planKey) && (!needsPrice || customPrice !== '');
+  const canConfirm = (!needsPlan || planKey) && (!needsPrice || customPrice !== '') && !submitting;
 
-  const handleConfirm = () => {
-    if (!canConfirm) return;
-    onConfirm({ planKey: planKey || null, customPrice: needsPrice ? customPrice : undefined });
+  // 確定完了まで待ち、成功時のみモーダルを閉じる（連打・反映待ちの間の再操作を防ぐ）
+  const handleConfirm = async () => {
+    if (!canConfirm || submitting) return;
+    setSubmitting(true);
+    try {
+      const ok = await onConfirm({ planKey: planKey || null, customPrice: needsPrice ? customPrice : undefined });
+      if (ok) onClose();          // 成功 → 閉じる
+      else setSubmitting(false);  // 失敗（二重確定等）→ 開いたまま再試行可能に
+    } catch {
+      setSubmitting(false);
+    }
   };
 
   const checkLine = (color, text) => (
@@ -4357,7 +4374,7 @@ function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
           fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
         }}>
-          <Check size={13} /> この内容で確定
+          <Check size={13} /> {submitting ? '確定中…' : 'この内容で確定'}
         </button>
       </div>
     </ModalShell>

@@ -9,8 +9,8 @@
 
 import { db } from './firebase';
 import {
-  collection, getDocs, onSnapshot,
-  doc, addDoc, setDoc, updateDoc, deleteDoc, writeBatch,
+  collection, getDocs, onSnapshot, query, where,
+  doc, addDoc, setDoc, updateDoc, deleteDoc, writeBatch, runTransaction,
 } from 'firebase/firestore';
 
 const SESSIONS = 'sessions';
@@ -49,9 +49,20 @@ export function patchSession(id, patch) {
   return updateDoc(doc(db, SESSIONS, String(id)), clean(patch));
 }
 
-// 削除
+// 削除（会のみ）。紐づく参加者ごと消す場合は removeSessionWithParticipants を使う
 export function removeSession(id) {
   return deleteDoc(doc(db, SESSIONS, String(id)));
+}
+
+// 会＋紐づく参加者を原子的に削除（#3-B 孤児participant防止）。
+//   削除直前に participants を最新クエリで取り直してから batch 化するため、
+//   ローカルstateの取りこぼし（直近の予約）も拾える。完全な同時挿入は次回削除で回収。
+export async function removeSessionWithParticipants(id) {
+  const partSnap = await getDocs(query(collection(db, PARTICIPANTS_COL), where('sessionId', '==', id)));
+  const batch = writeBatch(db);
+  batch.delete(doc(db, SESSIONS, String(id)));
+  partSnap.forEach((d) => batch.delete(d.ref));
+  await batch.commit();
 }
 
 // サンプル投入（DEV用シード）。setDoc なので冪等（同じ id は重複せず上書き）
@@ -195,16 +206,23 @@ export async function seedAnnouncements(entriesArr) {
 }
 
 // =====================================================================
-// 日程調整の確定を原子的にコミット（会作成＋参加者登録＋ポール更新を1バッチ）
-//   全部成功か全部失敗か。中途半端な状態・会の二重作成を防ぐ。
-//   告知は非クリティカルのためバッチ外（呼び出し側でバッチ成功後に実行）。
+// 日程調整の確定を原子的にコミット（会作成＋参加者登録＋ポール更新を1トランザクション）
+//   #3-A 二重確定防止: tx内でpollを読み、status!=='open' なら 'already-confirmed' で中断。
+//   session/participant の id は呼び出し側で pollId 由来の決定論的ID（s_${pollId} 等）にしてあるため、
+//   万一2回走っても同じドキュメントに上書き＝会の二重作成にならない（冪等）。
+//   告知は非クリティカルのためtx外（呼び出し側でtx成功後に実行）。
+//   失敗時は 'poll-not-found' / 'already-confirmed' を Error.message で投げる。
 // =====================================================================
 export async function commitPollConfirmation({ session, participants, pollId, pollPatch }) {
-  const batch = writeBatch(db);
-  batch.set(doc(db, SESSIONS, String(session.id)), clean(session));
-  (participants || []).forEach((p) => {
-    batch.set(doc(db, PARTICIPANTS_COL, String(p.id)), clean(p));
+  await runTransaction(db, async (tx) => {
+    const pollRef = doc(db, SCHEDULE_POLLS_COL, String(pollId));
+    const pollSnap = await tx.get(pollRef); // 読み取りは書き込みより前（Firestoreトランザクション規則）
+    if (!pollSnap.exists()) throw new Error('poll-not-found');
+    if (pollSnap.data().status !== 'open') throw new Error('already-confirmed');
+    tx.set(doc(db, SESSIONS, String(session.id)), clean(session));
+    (participants || []).forEach((p) => {
+      tx.set(doc(db, PARTICIPANTS_COL, String(p.id)), clean(p));
+    });
+    tx.update(pollRef, clean(pollPatch));
   });
-  batch.update(doc(db, SCHEDULE_POLLS_COL, String(pollId)), clean(pollPatch));
-  await batch.commit();
 }

@@ -524,20 +524,17 @@ exports.submitPollResponse = onCall(async (request) => {
       const candidateCount = Array.isArray(poll.candidateDates) ? poll.candidateDates.length : 0;
       const answers = validateAnswers(data.answers, candidateCount);
 
-      // 本人の既存回答を探して上書き（無ければ新規）
-      const existingSnap = await tx.get(db.collection('pollResponses').where('pollId', '==', poll.id));
-      let targetRef = null;
-      let existingComment = '';
-      existingSnap.forEach((d) => {
-        const r = d.data();
-        if (targetRef) return;
-        if (r.customerId === me.id) { targetRef = d.ref; existingComment = r.comment || ''; }
-      });
-      const created = !targetRef;
-      if (!targetRef) targetRef = db.collection('pollResponses').doc();
+      // #4 決定論的ID `${pollId}_${customerId}`：同一人物は同じドキュメントに upsert。
+      //   全件クエリ（ポール全回答のロック）が不要になり、ロック範囲が自分の1ドキュメントのみ＝
+      //   大勢が同じ日程調整に同時回答してもトランザクション競合が起きにくい。
+      const responseId = `${poll.id}_${me.id}`;
+      const targetRef = db.collection('pollResponses').doc(responseId);
+      const existingSnap = await tx.get(targetRef);        // 読み取りは書き込みより前
+      const created = !existingSnap.exists;
+      const existingComment = existingSnap.exists ? (existingSnap.data().comment || '') : '';
 
       const response = {
-        id: targetRef.id,
+        id: responseId,
         pollId: poll.id,
         customerId: me.id,          // 本人
         name: me.name,
@@ -547,7 +544,7 @@ exports.submitPollResponse = onCall(async (request) => {
         respondedAt: nowStamp(),
       };
       tx.set(targetRef, response, { merge: false });
-      return { id: targetRef.id, created };
+      return { id: responseId, created };
     });
 
     return { ok: true, ...result };

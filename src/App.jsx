@@ -4,7 +4,7 @@ import {
   TrendingUp, User, Phone, Mail, Search, X, ArrowLeft, Wallet, Video, Star,
   Megaphone, Shuffle, Eye, EyeOff, Send, Copy, RotateCcw, XCircle, CheckCircle2,
   AlertTriangle, Bell, Hash, MessageCircle, Link2, Zap, MapPin, Lock, UserCheck, Plus,
-  List, LayoutGrid, CalendarDays, ListChecks, LogOut,
+  List, LayoutGrid, CalendarDays, ListChecks, LogOut, Home, Menu,
 } from 'lucide-react';
 import { signIn, signInWithGoogle, signOutUser, onAuthChange } from './lib/auth';
 import { claimProfile, fetchPublicData, fetchMyData, bookSession, cancelReservation, reportPayment, updateMyProfile, answerPoll } from './lib/functions';
@@ -380,6 +380,21 @@ const todayISO = () => {
   return `${y}-${m}-${dd}`;
 };
 
+// スマホ幅（640px以下）かどうかを返すフック。幅変化に追従（リサイズ/回転で再評価）。
+// PC/スマホでナビ構造を出し分けるために使用（第2段階：下部固定メニュー）
+function useIsMobile(maxWidth = 640) {
+  const query = `(max-width: ${maxWidth}px)`;
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const onChange = (e) => setIsMobile(e.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, [query]);
+  return isMobile;
+}
+
 // =====================================================================
 // トースト通知
 // =====================================================================
@@ -728,6 +743,8 @@ function AppInner() {
         @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes modalIn { from { opacity: 0; transform: scale(0.96) translateY(-8px); } to { opacity: 1; transform: scale(1) translateY(0); } }
         .modalIn { animation: modalIn 0.2s ease-out; }
+        @keyframes drawerIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        .drawerIn { animation: drawerIn 0.22s ease-out; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #d4d0c8; border-radius: 4px; }
@@ -740,6 +757,7 @@ function AppInner() {
           .resp-tabs { flex-wrap: wrap !important; overflow-x: visible !important; } /* 管理タブを折り返して全表示 */
           .resp-tabs > button { padding: 9px 11px !important; }
           .resp-scroll-x { overflow-x: auto !important; -webkit-overflow-scrolling: touch; } /* 固定列の広い表は横スクロール */
+          .sp-navpad { padding-bottom: 88px !important; } /* 下部固定メニューにコンテンツ末尾が隠れないよう余白確保 */
         }
       `}</style>
 
@@ -1093,6 +1111,7 @@ function CustomerView({ brandFilter, setBrandFilter }) {
   const filter = brandFilter;
   const setFilter = setBrandFilter;
   const [announceOpen, setAnnounceOpen] = useState(false);
+  const isMobile = useIsMobile();
 
   // ====== 検索・絞り込み state ======
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1207,6 +1226,21 @@ function CustomerView({ brandFilter, setBrandFilter }) {
     taimen: visibleSessions.filter(s => s.brand.key === 'taimen').length,
   };
 
+  // スマホ下部ナビ＋お知らせモーダル（list/mypage/polls の各画面に重ねる固定UI）
+  const mobileChrome = (
+    <>
+      {isMobile && (
+        <BottomNav items={[
+          { key: 'list', label: 'ホーム', icon: Home, active: step === 'list', onClick: () => setStep('list') },
+          { key: 'polls', label: '日程調整', icon: ListChecks, active: step === 'polls' || step === 'pollAnswer', onClick: () => setStep('polls'), dot: myPolls.length > 0 },
+          { key: 'mypage', label: 'マイページ', icon: User, active: step === 'mypage', onClick: () => setStep('mypage') },
+          { key: 'announce', label: 'お知らせ', icon: Bell, active: announceOpen, onClick: () => setAnnounceOpen(true), dot: true },
+        ]} />
+      )}
+      {announceOpen && <AnnouncementModal onClose={() => setAnnounceOpen(false)} />}
+    </>
+  );
+
   if (step === 'pollAnswer' && selectedPoll) return (
     <CustomerPollAnswer
       poll={selectedPoll}
@@ -1226,7 +1260,7 @@ function CustomerView({ brandFilter, setBrandFilter }) {
       }}
     />
   );
-  if (step === 'polls') return (
+  if (step === 'polls') return (<>
     <CustomerPollList
       polls={myPolls}
       responses={responses}
@@ -1234,8 +1268,9 @@ function CustomerView({ brandFilter, setBrandFilter }) {
       onBack={() => setStep('list')}
       onSelect={(pid) => { setSelectedPollId(pid); setStep('pollAnswer'); }}
     />
-  );
-  if (step === 'mypage')   return <MyPage onBack={() => setStep('list')} />;
+    {mobileChrome}
+  </>);
+  if (step === 'mypage')   return (<><MyPage onBack={() => setStep('list')} />{mobileChrome}</>);
   if (step === 'confirm' && selected) return <ConfirmBooking session={selected} onBack={() => setStep('detail')} onDone={() => { refresh(); refreshPublic(); setStep('done'); }} profile={profile} />;
   if (step === 'done' && selected)    return <BookingDone session={selected} onHome={() => { setStep('list'); setSelected(null); }} onPay={() => setStep('detail')} />;
   if (step === 'detail' && selected)  return <SessionDetail session={selected} onBack={() => setStep('list')} onBook={() => { if (!isLoggedIn) { toast.push('予約にはログインが必要です（上部のGoogleログイン）', 'warn'); return; } setStep('confirm'); }} myParticipant={getMyParticipant(selected.id)} cancelBooking={async (pid) => { await cancelReservation({ participantId: pid }); refresh(); refreshPublic(); }} reportBooking={async (pid) => { await reportPayment({ participantId: pid }); refresh(); }} />;
@@ -1251,8 +1286,8 @@ function CustomerView({ brandFilter, setBrandFilter }) {
     </div>
   );
 
-  return (
-    <div className="resp-shell" style={{ maxWidth: 1080, margin: '0 auto', padding: '32px 28px 80px' }}>
+  return (<>
+    <div className={`resp-shell${isMobile ? ' sp-navpad' : ''}`} style={{ maxWidth: 1080, margin: '0 auto', padding: '32px 28px 80px' }}>
       <ParticipantAuthBar />
       {(() => {
         const heroBrand = filter === 'all' ? BRAND.okiraku : BRAND[filter];
@@ -1278,7 +1313,8 @@ function CustomerView({ brandFilter, setBrandFilter }) {
         </div>
 
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {isLoggedIn && (
+          {/* スマホでは マイページ/お知らせ は下部ナビに集約（二重表示を防ぐ）。検索は一覧画面に残す */}
+          {!isMobile && isLoggedIn && (
             <button onClick={() => setStep('mypage')} style={btnGhost()}>
               <User size={14} /> マイページ
             </button>
@@ -1299,10 +1335,12 @@ function CustomerView({ brandFilter, setBrandFilter }) {
               }}>{activeFilterCount}</span>
             )}
           </button>
-          <button onClick={() => setAnnounceOpen(true)} style={{ ...btnGhost(), color: '#e8645f', borderColor: '#f5c5c2', position: 'relative' }}>
-            <Bell size={14} /> お知らせ
-            <span style={{ position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: '50%', background: '#e8645f' }} />
-          </button>
+          {!isMobile && (
+            <button onClick={() => setAnnounceOpen(true)} style={{ ...btnGhost(), color: '#e8645f', borderColor: '#f5c5c2', position: 'relative' }}>
+              <Bell size={14} /> お知らせ
+              <span style={{ position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: '50%', background: '#e8645f' }} />
+            </button>
+          )}
         </div>
       </section>
         );
@@ -1524,9 +1562,9 @@ function CustomerView({ brandFilter, setBrandFilter }) {
         />
       )}
 
-      {announceOpen && <AnnouncementModal onClose={() => setAnnounceOpen(false)} />}
     </div>
-  );
+    {mobileChrome}
+  </>);
 }
 
 // ============ 参加者：日程調整 回答待ちリスト ============
@@ -1535,7 +1573,7 @@ function CustomerPollList({ polls, responses, myId, onBack, onSelect }) {
   const answeredOf = (pid) => isLoggedIn && (responses || []).some(r => r.pollId === pid);
 
   return (
-    <div className="fadeup resp-shell" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
+    <div className="fadeup resp-shell sp-navpad" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="ホームに戻る" accent="#6b5dc7" />
       <h2 className="maru" style={{ fontSize: 22, fontWeight: 900, color: '#2c3140', margin: '18px 0 4px' }}>日程調整</h2>
       <p style={{ fontSize: 12, color: '#6b6e7a', marginBottom: 22 }}>参加できる候補日を回答してください。あなたの回答が開催日の決定に使われます。</p>
@@ -3340,7 +3378,7 @@ function MyPage({ onBack }) {
   const [editing, setEditing] = useState(false);
   // loading 中（アカウント切替・再取得）は古い me を描画しない＝前ユーザーのデータ混線を二重に防止
   if (!me || loading) return (
-    <div className="fadeup resp-shell" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
+    <div className="fadeup resp-shell sp-navpad" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="ホームに戻る" />
       <div style={{ marginTop: 20 }}><EmptyCard text="プロフィールを読み込み中…" /></div>
     </div>
@@ -3353,7 +3391,7 @@ function MyPage({ onBack }) {
   const myHistory = enriched.filter(b => b.session?.brand && b.session.status === 'closed');
 
   return (
-    <div className="fadeup resp-shell" style={{ maxWidth: 880, margin: '0 auto', padding: '32px 28px 80px' }}>
+    <div className="fadeup resp-shell sp-navpad" style={{ maxWidth: 880, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="ホームに戻る" accent={BRAND.okiraku.primary} />
       {editing && <ProfileEditModal profile={me} onClose={() => setEditing(false)} onSaved={refresh} />}
 
@@ -3561,36 +3599,131 @@ function PhaseNote({ info }) {
   );
 }
 
+// ============ スマホ用：下部固定ナビ（第2段階）============
+// items: [{ key, label, icon, active, onClick, dot }]。position:fixed で常時表示。呼び出し側で isMobile 判定。
+function BottomNav({ items }) {
+  return (
+    <nav style={{
+      position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 120,
+      background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(12px)',
+      borderTop: '1px solid #e8e5dd',
+      display: 'flex', justifyContent: 'space-around', alignItems: 'stretch',
+      paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+      boxShadow: '0 -2px 12px rgba(0,0,0,0.05)',
+    }}>
+      {items.map(it => {
+        const Icon = it.icon;
+        return (
+          <button key={it.key} onClick={it.onClick} style={{
+            flex: 1, border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit',
+            padding: '9px 4px 10px', minHeight: 56,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+            color: it.active ? '#2c3140' : '#9499a8', position: 'relative', transition: 'color 0.15s',
+          }}>
+            <Icon size={21} strokeWidth={it.active ? 2.5 : 2} />
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.02em' }}>{it.label}</span>
+            {it.dot && <span style={{ position: 'absolute', top: 7, right: 'calc(50% - 16px)', width: 6, height: 6, borderRadius: '50%', background: '#e8645f' }} />}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+// ============ スマホ用：管理画面の全機能ドロワー（右からスライド・第2段階）============
+function AdminMenuDrawer({ open, onClose, tabs, current, onSelect }) {
+  if (!open) return null;
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.4)',
+      display: 'flex', justifyContent: 'flex-end',
+    }}>
+      <div className="drawerIn" onClick={(e) => e.stopPropagation()} style={{
+        width: '80%', maxWidth: 320, height: '100%', background: '#fff',
+        boxShadow: '-4px 0 24px rgba(0,0,0,0.14)', display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{ padding: '16px 18px', borderBottom: '1px solid #e8e5dd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="maru" style={{ fontWeight: 900, fontSize: 15, color: '#2c3140' }}>メニュー</span>
+          <button onClick={onClose} aria-label="閉じる" style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#6b6e7a', display: 'flex' }}><X size={20} /></button>
+        </div>
+        <div style={{ overflowY: 'auto', padding: 8 }}>
+          {tabs.map(t => {
+            const Icon = t.icon;
+            const active = current === t.id;
+            return (
+              <button key={t.id} onClick={() => { onSelect(t.id); onClose(); }} style={{
+                width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10,
+                padding: '13px 14px', borderRadius: 10, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                background: active ? '#f0eee8' : 'transparent', color: active ? '#2c3140' : '#6b6e7a',
+                fontSize: 13, fontWeight: 700, marginBottom: 2,
+              }}>
+                <Icon size={16} /> <span style={{ flex: 1 }}>{t.label}</span>
+                {PHASE_NOTES[t.id] && <PhaseBadge kind={PHASE_NOTES[t.id].kind} />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminView({ sessions, participants, updateParticipant, updateSession, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, deleteSchedulePoll, announceHistory, addAnnounce }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const isMobile = useIsMobile();
+  const [drawerOpen, setDrawerOpen] = useState(false);
   // 役職割り振りは専用アプリ『人狼会CAST』へ分離。当タブは案内パネルのみ表示（PhaseNote external）。
+  const adminTabs = [
+    { id: 'dashboard', label: 'ダッシュボード', icon: TrendingUp },
+    { id: 'schedule', label: '日程調整', icon: ListChecks },
+    { id: 'sessions', label: '会の管理', icon: Calendar },
+    { id: 'payments', label: '参加者・支払い', icon: CreditCard },
+    { id: 'roles', label: '役職割り振り', icon: Shuffle },
+    { id: 'announce', label: '告知センター', icon: Megaphone },
+    { id: 'customers', label: '顧客管理', icon: Users },
+  ];
+  const go = (id) => { setTab(id); setSelectedCustomer(null); };
+  // スマホ下部ナビは主要4項目（残り3項目は右上「メニュー」ドロワーから）
+  const bottomItems = ['dashboard', 'sessions', 'payments', 'schedule'].map(id => {
+    const t = adminTabs.find(x => x.id === id);
+    return { key: id, label: t.label.replace('参加者・', ''), icon: t.icon, active: tab === id, onClick: () => go(id) };
+  });
+  const activeTab = adminTabs.find(t => t.id === tab);
 
   return (
-    <div className="resp-shell" style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 80px' }}>
-      <div className="resp-tabs" style={{ display: 'flex', gap: 2, marginBottom: 24, borderBottom: '1px solid #e8e5dd', overflowX: 'auto' }}>
-        {[
-          { id: 'dashboard', label: 'ダッシュボード', icon: TrendingUp },
-          { id: 'schedule', label: '日程調整', icon: ListChecks },
-          { id: 'sessions', label: '会の管理', icon: Calendar },
-          { id: 'payments', label: '参加者・支払い', icon: CreditCard },
-          { id: 'roles', label: '役職割り振り', icon: Shuffle },
-          { id: 'announce', label: '告知センター', icon: Megaphone },
-          { id: 'customers', label: '顧客管理', icon: Users },
-        ].map(t => {
-          const Icon = t.icon;
-          const active = tab === t.id;
-          return (
-            <button key={t.id} onClick={() => { setTab(t.id); setSelectedCustomer(null); }} style={{
-              padding: '11px 16px', background: 'transparent', border: 'none',
-              color: active ? '#2c3140' : '#9499a8',
-              borderBottom: `2px solid ${active ? '#2c3140' : 'transparent'}`,
-              cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
-              display: 'flex', alignItems: 'center', gap: 6, marginBottom: -1, whiteSpace: 'nowrap',
-            }}><Icon size={13} /> {t.label}{PHASE_NOTES[t.id] && <PhaseBadge kind={PHASE_NOTES[t.id].kind} />}</button>
-          );
-        })}
-      </div>
+    <div className={`resp-shell${isMobile ? ' sp-navpad' : ''}`} style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 80px' }}>
+      {isMobile ? (
+        // スマホ：上部タブの代わりに「現在地タイトル＋メニュー(≡)」のサブヘッダー
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            {activeTab && <activeTab.icon size={18} color="#2c3140" />}
+            <span className="maru" style={{ fontSize: 16, fontWeight: 900, color: '#2c3140', whiteSpace: 'nowrap' }}>{activeTab?.label}</span>
+            {PHASE_NOTES[tab] && <PhaseBadge kind={PHASE_NOTES[tab].kind} />}
+          </div>
+          <button onClick={() => setDrawerOpen(true)} aria-label="メニュー" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5, padding: '8px 12px',
+            background: '#fff', border: '1px solid #e0ddd6', borderRadius: 8,
+            color: '#2c3140', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+          }}><Menu size={15} /> メニュー</button>
+        </div>
+      ) : (
+        <div className="resp-tabs" style={{ display: 'flex', gap: 2, marginBottom: 24, borderBottom: '1px solid #e8e5dd', overflowX: 'auto' }}>
+          {adminTabs.map(t => {
+            const Icon = t.icon;
+            const active = tab === t.id;
+            return (
+              <button key={t.id} onClick={() => go(t.id)} style={{
+                padding: '11px 16px', background: 'transparent', border: 'none',
+                color: active ? '#2c3140' : '#9499a8',
+                borderBottom: `2px solid ${active ? '#2c3140' : 'transparent'}`,
+                cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+                display: 'flex', alignItems: 'center', gap: 6, marginBottom: -1, whiteSpace: 'nowrap',
+              }}><Icon size={13} /> {t.label}{PHASE_NOTES[t.id] && <PhaseBadge kind={PHASE_NOTES[t.id].kind} />}</button>
+            );
+          })}
+        </div>
+      )}
 
       {PHASE_NOTES[tab] && <PhaseNote info={PHASE_NOTES[tab]} />}
 
@@ -3604,6 +3737,9 @@ function AdminView({ sessions, participants, updateParticipant, updateSession, a
       {tab === 'customers' && (selectedCustomer
         ? <CustomerDetail customer={selectedCustomer} onBack={() => setSelectedCustomer(null)} sessions={sessions} participants={participants} />
         : <CustomersAdmin onSelect={setSelectedCustomer} />)}
+
+      {isMobile && <BottomNav items={bottomItems} />}
+      {isMobile && <AdminMenuDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} tabs={adminTabs} current={tab} onSelect={go} />}
     </div>
   );
 }

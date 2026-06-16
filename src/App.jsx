@@ -370,6 +370,16 @@ const safeHttpUrl = (url) => {
   }
 };
 
+// 今日（ローカル）の YYYY-MM-DD。会の過去/未来判定の基準（今日の0時）。
+// session.date が 'YYYY-MM-DD' 文字列なので、文字列比較で過去/未来を判定できる
+const todayISO = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+};
+
 // =====================================================================
 // トースト通知
 // =====================================================================
@@ -4432,7 +4442,12 @@ function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
 
 // ============ ダッシュボード ============
 function Dashboard({ sessions, participants }) {
+  const today = todayISO();
   const upcoming = sessions.filter(s => s.status === 'open').map(enrichSession);
+  // 「開催予定の会」リスト用：過去日（今日0時より前）を除外し、直近の日程から昇順に並べる
+  const upcomingSorted = upcoming
+    .filter(s => s.date >= today)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const totalRevenue = upcoming.reduce((sum, s) => {
     const cnt = participants.filter(p => p.sessionId === s.id && !p.cancelled).length;
     return sum + s.price * cnt;
@@ -4460,7 +4475,10 @@ function Dashboard({ sessions, participants }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
         <section style={{ padding: 20, background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12 }}>
           <h3 className="maru" style={{ fontSize: 14, fontWeight: 900, color: '#2c3140', margin: '0 0 16px' }}>開催予定の会</h3>
-          {upcoming.slice(0, 6).map(s => {
+          {upcomingSorted.length === 0 && (
+            <div style={{ fontSize: 12, color: '#9499a8', padding: '8px 0' }}>開催予定の会はありません</div>
+          )}
+          {upcomingSorted.slice(0, 6).map(s => {
             const cnt = participants.filter(p => p.sessionId === s.id && !p.cancelled).length;
             const ratio = cnt / s.capacity;
             return (
@@ -4549,7 +4567,37 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
   const [yearMonth, setYearMonth] = useState('2026-05');
   const [popupDate, setPopupDate] = useState(null);
   const [popupSessions, setPopupSessions] = useState([]);
+  const [dateTab, setDateTab] = useState('upcoming');     // 'upcoming'(今日以降) | 'past'(過去)
+  const [sortKey, setSortKey] = useState('date');         // date|brand|title|price|bookings
+  const [sortDir, setSortDir] = useState('asc');          // asc|desc
   const toast = useToast();
+
+  const today = todayISO();
+  // 列見出しクリックでソート切替（同じ列の再クリックで昇順/降順を反転）
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+  };
+  // 開催予定/開催済みタブで会を絞り込み（過去/未来の判定は開催日＝今日0時基準）→ ソート
+  const visibleRows = sessions
+    .filter(raw => (dateTab === 'upcoming' ? raw.date >= today : raw.date < today))
+    .map(raw => {
+      const s = enrichSession(raw);
+      const cnt = participants.filter(p => p.sessionId === s.id && !p.cancelled).length;
+      return { raw, s, cnt };
+    })
+    .sort((a, b) => {
+      let cmp;
+      switch (sortKey) {
+        case 'brand': cmp = a.s.brand.name.localeCompare(b.s.brand.name, 'ja'); break;
+        case 'title': cmp = (a.s.title || '').localeCompare(b.s.title || '', 'ja'); break;
+        case 'price': cmp = a.s.price - b.s.price; break;
+        case 'bookings': cmp = a.cnt - b.cnt; break;
+        default: cmp = a.s.date < b.s.date ? -1 : a.s.date > b.s.date ? 1 : 0; break; // date
+      }
+      if (cmp === 0) cmp = a.s.date < b.s.date ? -1 : a.s.date > b.s.date ? 1 : 0; // 同値は日付で安定化
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
 
   return (
     <div className="fadeup">
@@ -4578,6 +4626,20 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
               transition: 'all 0.15s',
             }}><LayoutGrid size={12} /> カレンダー</button>
           </div>
+          {/* 開催予定 / 開催済み タブ（一覧表示のときのみ・開催日で振り分け） */}
+          {viewMode === 'list' && (
+            <div style={{ display: 'flex', background: '#f0eee8', borderRadius: 8, padding: 3 }}>
+              {[['upcoming', '開催予定'], ['past', '開催済み']].map(([key, label]) => (
+                <button key={key} onClick={() => setDateTab(key)} style={{
+                  padding: '7px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+                  background: dateTab === key ? '#2c3140' : 'transparent',
+                  color: dateTab === key ? '#fff' : '#6b6e7a',
+                  transition: 'all 0.15s',
+                }}>{label}</button>
+              ))}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* 開発用：サンプルデータを Firestore に投入（本番ビルドでは非表示・冪等） */}
@@ -4631,14 +4693,29 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
           gap: 10, padding: '12px 16px',
           background: '#fafaf6', fontSize: 10, fontWeight: 700, color: '#9499a8', letterSpacing: '0.1em',
         }}>
-          <div>日付</div><div>ブランド</div><div>会タイトル / 詳細</div>
-          <div style={{ textAlign: 'right' }}>料金</div>
-          <div style={{ textAlign: 'right' }}>予約</div>
+          {[
+            { key: 'date', label: '日付', align: 'left' },
+            { key: 'brand', label: 'ブランド', align: 'left' },
+            { key: 'title', label: '会タイトル / 詳細', align: 'left' },
+            { key: 'price', label: '料金', align: 'right' },
+            { key: 'bookings', label: '予約', align: 'right' },
+          ].map(col => (
+            <div key={col.key} onClick={() => toggleSort(col.key)} title="クリックで並び替え" style={{
+              cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 3,
+              justifyContent: col.align === 'right' ? 'flex-end' : 'flex-start',
+              color: sortKey === col.key ? '#2c3140' : '#9499a8',
+            }}>
+              {col.label}<span style={{ fontSize: 9 }}>{sortKey === col.key ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+            </div>
+          ))}
           <div style={{ textAlign: 'right' }}>操作</div>
         </div>
-        {sessions.filter(s => s.status === 'open').map(raw => {
-          const s = enrichSession(raw);
-          const cnt = participants.filter(p => p.sessionId === s.id && !p.cancelled).length;
+        {visibleRows.length === 0 && (
+          <div style={{ padding: '20px 16px', borderTop: '1px solid #f5f3ed', fontSize: 12, color: '#9499a8', textAlign: 'center' }}>
+            {dateTab === 'upcoming' ? '開催予定の会はありません' : '開催済みの会はありません'}
+          </div>
+        )}
+        {visibleRows.map(({ raw, s, cnt }) => {
           const ratio = cnt / s.capacity;
           return (
             <div key={s.id} style={{

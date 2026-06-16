@@ -731,6 +731,16 @@ function AppInner() {
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #d4d0c8; border-radius: 4px; }
+        /* ===== スマホ最適化（第1段階・640px以下）。inline style を !important で上書き。PC幅では無効 ===== */
+        @media (max-width: 640px) {
+          .resp-shell { padding-left: 16px !important; padding-right: 16px !important; }
+          .resp-header { padding-left: 16px !important; padding-right: 16px !important; }
+          .resp-stack { grid-template-columns: 1fr !important; }       /* 多カラム→縦積み */
+          .resp-2col { grid-template-columns: repeat(2, 1fr) !important; } /* 4列等→2列 */
+          .resp-tabs { flex-wrap: wrap !important; overflow-x: visible !important; } /* 管理タブを折り返して全表示 */
+          .resp-tabs > button { padding: 9px 11px !important; }
+          .resp-scroll-x { overflow-x: auto !important; -webkit-overflow-scrolling: touch; } /* 固定列の広い表は横スクロール */
+        }
       `}</style>
 
       {/* 上部の水彩風アクセント（ブランドに連動して色が切り替わる） */}
@@ -743,7 +753,7 @@ function AppInner() {
         transition: 'background 0.6s ease',
       }} />
 
-      <header style={{
+      <header className="resp-header" style={{
         position: 'sticky', top: 6, zIndex: 50,
         background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)',
         borderBottom: '1px solid rgba(0,0,0,0.06)',
@@ -1242,7 +1252,7 @@ function CustomerView({ brandFilter, setBrandFilter }) {
   );
 
   return (
-    <div style={{ maxWidth: 1080, margin: '0 auto', padding: '32px 28px 80px' }}>
+    <div className="resp-shell" style={{ maxWidth: 1080, margin: '0 auto', padding: '32px 28px 80px' }}>
       <ParticipantAuthBar />
       {(() => {
         const heroBrand = filter === 'all' ? BRAND.okiraku : BRAND[filter];
@@ -1525,7 +1535,7 @@ function CustomerPollList({ polls, responses, myId, onBack, onSelect }) {
   const answeredOf = (pid) => isLoggedIn && (responses || []).some(r => r.pollId === pid);
 
   return (
-    <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
+    <div className="fadeup resp-shell" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="ホームに戻る" accent="#6b5dc7" />
       <h2 className="maru" style={{ fontSize: 22, fontWeight: 900, color: '#2c3140', margin: '18px 0 4px' }}>日程調整</h2>
       <p style={{ fontSize: 12, color: '#6b6e7a', marginBottom: 22 }}>参加できる候補日を回答してください。あなたの回答が開催日の決定に使われます。</p>
@@ -1615,7 +1625,7 @@ function CustomerPollAnswer({ poll, pollCounts, responses, myId, onBack, onSubmi
   ];
 
   return (
-    <div className="fadeup" style={{ maxWidth: 560, margin: '0 auto', padding: '32px 28px 120px' }}>
+    <div className="fadeup resp-shell" style={{ maxWidth: 560, margin: '0 auto', padding: '32px 28px 120px' }}>
       <BackButton onClick={onBack} label="回答リストへ戻る" accent={accent} />
 
       {/* ヘッダー */}
@@ -2185,7 +2195,7 @@ function BrandTabs({ filter, setFilter, counts }) {
       <div className="hand" style={{ fontSize: 17, color: '#6b6e7a', marginBottom: 8, marginLeft: 4 }}>
         ブランドで絞り込む ↓
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+      <div className="resp-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
         {tabs.map(t => {
           const active = filter === t.id;
           return (
@@ -2749,7 +2759,7 @@ function SessionDetail({ session, onBack, onBook, myParticipant, cancelBooking, 
   };
 
   return (
-    <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
+    <div className="fadeup resp-shell" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="一覧へ戻る" accent={b.primary} />
 
       <div style={{
@@ -2822,7 +2832,7 @@ function SessionDetail({ session, onBack, onBook, myParticipant, cancelBooking, 
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     {(() => {
                       const linkStyle = {
-                        flex: 1, fontSize: 12, color: '#2c3140', fontFamily: "'DM Mono', monospace",
+                        flex: 1, minWidth: 0, fontSize: 12, color: '#2c3140', fontFamily: "'DM Mono', monospace",
                         padding: '8px 12px', background: '#fff', borderRadius: 6,
                         textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         border: '1px solid #d4e3f0',
@@ -3178,7 +3188,7 @@ function ConfirmBooking({ session, onBack, onDone, profile }) {
   };
 
   return (
-    <div className="fadeup" style={{ maxWidth: 540, margin: '0 auto', padding: '32px 28px 80px' }}>
+    <div className="fadeup resp-shell" style={{ maxWidth: 540, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="詳細に戻る" accent={b.primary} />
 
       <h2 className="maru" style={{ fontSize: 24, fontWeight: 900, color: '#2c3140', marginBottom: 22 }}>予約内容の確認</h2>
@@ -3330,7 +3340,7 @@ function MyPage({ onBack }) {
   const [editing, setEditing] = useState(false);
   // loading 中（アカウント切替・再取得）は古い me を描画しない＝前ユーザーのデータ混線を二重に防止
   if (!me || loading) return (
-    <div className="fadeup" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
+    <div className="fadeup resp-shell" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="ホームに戻る" />
       <div style={{ marginTop: 20 }}><EmptyCard text="プロフィールを読み込み中…" /></div>
     </div>
@@ -3343,11 +3353,11 @@ function MyPage({ onBack }) {
   const myHistory = enriched.filter(b => b.session?.brand && b.session.status === 'closed');
 
   return (
-    <div className="fadeup" style={{ maxWidth: 880, margin: '0 auto', padding: '32px 28px 80px' }}>
+    <div className="fadeup resp-shell" style={{ maxWidth: 880, margin: '0 auto', padding: '32px 28px 80px' }}>
       <BackButton onClick={onBack} label="ホームに戻る" accent={BRAND.okiraku.primary} />
       {editing && <ProfileEditModal profile={me} onClose={() => setEditing(false)} onSaved={refresh} />}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 18, marginBottom: 28 }}>
+      <div className="resp-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 18, marginBottom: 28 }}>
         <div style={{
           padding: 24, background: BRAND.okiraku.gradient,
           borderRadius: 14, textAlign: 'center',
@@ -3420,7 +3430,7 @@ function MyPage({ onBack }) {
       </div>
 
       <h3 className="maru" style={{ fontSize: 16, fontWeight: 900, color: '#2c3140', marginBottom: 12 }}>参加履歴</h3>
-      <div style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 10, overflow: 'hidden' }}>
+      <div className="resp-scroll-x" style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 10, overflow: 'hidden' }}>
         {myHistory.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: '#9499a8', fontSize: 12 }}>履歴がありません</div>}
         {myHistory.map((h, i) => {
           const s = h.session;
@@ -3557,8 +3567,8 @@ function AdminView({ sessions, participants, updateParticipant, updateSession, a
   // 役職割り振りは専用アプリ『人狼会CAST』へ分離。当タブは案内パネルのみ表示（PhaseNote external）。
 
   return (
-    <div style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 80px' }}>
-      <div style={{ display: 'flex', gap: 2, marginBottom: 24, borderBottom: '1px solid #e8e5dd', overflowX: 'auto' }}>
+    <div className="resp-shell" style={{ maxWidth: 1280, margin: '0 auto', padding: '24px 28px 80px' }}>
+      <div className="resp-tabs" style={{ display: 'flex', gap: 2, marginBottom: 24, borderBottom: '1px solid #e8e5dd', overflowX: 'auto' }}>
         {[
           { id: 'dashboard', label: 'ダッシュボード', icon: TrendingUp },
           { id: 'schedule', label: '日程調整', icon: ListChecks },
@@ -4465,15 +4475,15 @@ function Dashboard({ sessions, participants }) {
 
   return (
     <div className="fadeup">
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 28 }}>
+      <div className="resp-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 28 }}>
         <KPI label="今月の売上見込" value={fmtYen(totalRevenue)} accent="#5b9bd5" />
         <KPI label="予約総数" value={`${totalBookings}件`} accent="#6b5dc7" />
         <KPI label="未払い件数" value={`${unpaid}件`} accent="#e8645f" />
         <KPI label="返金処理待ち" value={`${refundsDue}件`} accent="#d44a4a" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
-        <section style={{ padding: 20, background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12 }}>
+      <div className="resp-stack" style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
+        <section className="resp-scroll-x" style={{ padding: 20, background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12 }}>
           <h3 className="maru" style={{ fontSize: 14, fontWeight: 900, color: '#2c3140', margin: '0 0 16px' }}>開催予定の会</h3>
           {upcomingSorted.length === 0 && (
             <div style={{ fontSize: 12, color: '#9499a8', padding: '8px 0' }}>開催予定の会はありません</div>
@@ -4687,7 +4697,7 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
           onDayClick={(date, daySessions) => { setPopupDate(date); setPopupSessions(daySessions); }}
         />
       ) : (
-      <div style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12, overflow: 'hidden' }}>
+      <div className="resp-scroll-x" style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12, overflow: 'hidden' }}>
         <div style={{
           display: 'grid', gridTemplateColumns: '90px 90px 1fr 80px 70px 130px',
           gap: 10, padding: '12px 16px',
@@ -5163,7 +5173,7 @@ function PaymentsAdmin({ sessions, participants, updateParticipant }) {
     <div className="fadeup">
       <h3 className="maru" style={{ fontSize: 16, fontWeight: 900, color: '#2c3140', margin: '0 0 18px' }}>参加者・支払い管理（今月）</h3>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 22 }}>
+      <div className="resp-2col" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 22 }}>
         <KPI label="入金済" value={fmtYen(summary.totalCollected)} accent="#3a8c5b" />
         <KPI label="未入金" value={fmtYen(summary.totalUnpaid)} accent="#e8645f" />
         <KPI label="返金待ち" value={fmtYen(summary.totalRefundDue)} accent="#d44a4a" />
@@ -5196,7 +5206,7 @@ function PaymentsAdmin({ sessions, participants, updateParticipant }) {
           const refundDueCount = totalParts.filter(p => p.cancelled && p.paid && !p.refunded).length;
 
           return (
-            <div key={s.id} style={{
+            <div key={s.id} className="resp-scroll-x" style={{
               background: '#fff', border: `1px solid ${isOpen ? s.brand.primary : '#e8e5dd'}`,
               borderRadius: 10, overflow: 'hidden', transition: 'border-color 0.2s',
             }}>
@@ -5690,7 +5700,7 @@ function AnnouncementCenter({ sessions, participants, history, addHistory }) {
       )}
 
       {tab === 'history' && (
-        <div style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 10, overflow: 'hidden' }}>
+        <div className="resp-scroll-x" style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 10, overflow: 'hidden' }}>
           {history.map((h, i) => (
             <div key={i} style={{
               padding: '12px 18px', display: 'grid',
@@ -6107,7 +6117,7 @@ function CustomerDetail({ customer, onBack, sessions, participants }) {
     <div className="fadeup">
       <BackButton onClick={onBack} label="顧客一覧へ戻る" accent={fav?.primary || '#2c3140'} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 18, marginBottom: 26 }}>
+      <div className="resp-stack" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 18, marginBottom: 26 }}>
         <div style={{
           padding: 24, background: fav?.gradient || BRAND.okiraku.gradient,
           borderRadius: 14,
@@ -6159,7 +6169,7 @@ function CustomerDetail({ customer, onBack, sessions, participants }) {
       )}
 
       <h3 className="maru" style={{ fontSize: 14, fontWeight: 900, color: '#2c3140', marginBottom: 12 }}>参加履歴</h3>
-      <div style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 10, overflow: 'hidden' }}>
+      <div className="resp-scroll-x" style={{ background: '#fff', border: '1px solid #e8e5dd', borderRadius: 10, overflow: 'hidden' }}>
         {myHistory.map((h, i) => {
           const s = h.session;
           const rs = h.role ? ROLE_STYLES[h.role] : null;

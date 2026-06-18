@@ -4089,6 +4089,14 @@ function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
     return next;
   });
   const filteredCustomers = customers.filter(c => !inviteSearch || (c.name || '').includes(inviteSearch) || (c.handle || '').includes(inviteSearch));
+  // 表示中（検索結果）の全員が選択済みか／一括チェック・解除
+  const allFilteredSelected = filteredCustomers.length > 0 && filteredCustomers.every(c => invited.has(c.id));
+  const toggleAllFiltered = () => setInvited(prev => {
+    const next = new Set(prev);
+    if (filteredCustomers.every(c => next.has(c.id))) filteredCustomers.forEach(c => next.delete(c.id)); // 全解除
+    else filteredCustomers.forEach(c => next.add(c.id)); // 全選択
+    return next;
+  });
 
   const validCandidates = candidates.filter(c => c.date);
   const canSave = validCandidates.length >= 1 && (targetMode === 'all' || invited.size >= 1);
@@ -4220,12 +4228,22 @@ function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
           </div>
           {targetMode === 'selected' && (
             <div style={{ border: '1px solid #e8e5dd', borderRadius: 10, overflow: 'hidden' }}>
-              <div style={{ padding: '10px 12px', borderBottom: '1px solid #f0ede5', display: 'flex', gap: 10, alignItems: 'center' }}>
-                <div style={{ position: 'relative', flex: 1 }}>
+              <div style={{ padding: '10px 12px', borderBottom: '1px solid #f0ede5', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ position: 'relative' }}>
                   <Search size={13} color="#9499a8" style={{ position: 'absolute', left: 11, top: 9 }} />
                   <input value={inviteSearch} onChange={(e) => setInviteSearch(e.target.value)} placeholder="顧客を検索" style={{ ...inputStyle, fontSize: 12, padding: '8px 12px 8px 32px' }} />
                 </div>
-                <span className="num" style={{ fontSize: 12, color: accent, fontWeight: 700, whiteSpace: 'nowrap' }}>{invited.size} 名選択中</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <button type="button" onClick={toggleAllFiltered} disabled={filteredCustomers.length === 0} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px',
+                    background: allFilteredSelected ? accent : '#fff',
+                    border: `1.5px solid ${allFilteredSelected ? accent : '#d4d0c8'}`,
+                    color: allFilteredSelected ? '#fff' : '#6b6e7a',
+                    borderRadius: 8, cursor: filteredCustomers.length === 0 ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit', fontSize: 11, fontWeight: 700,
+                  }}><Check size={12} /> {allFilteredSelected ? '全員解除' : '全員選択'}{inviteSearch && '（表示中）'}</button>
+                  <span className="num" style={{ fontSize: 12, color: accent, fontWeight: 700, whiteSpace: 'nowrap' }}>{invited.size} 名選択中</span>
+                </div>
               </div>
               <div style={{ maxHeight: 220, overflow: 'auto' }}>
                 {filteredCustomers.map(c => {

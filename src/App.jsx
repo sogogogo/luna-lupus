@@ -1182,14 +1182,21 @@ function CustomerView({ brandFilter, setBrandFilter }) {
   };
 
   const filtered = useMemo(() => {
+    const today = todayISO();
+    // 自分が予約済みの会（満員でもキャンセル導線のため一覧に残す）
+    const booked = new Set((bookings || []).filter(b => !b.cancelled).map(b => b.sessionId));
     return visibleSessions.filter(s => {
       if (filter !== 'all' && s.brand.key !== filter) return false;
       if (!matchesQuery(s)) return false;
       if (!matchesPrice(s.price)) return false;
       if (!matchesDate(s.date)) return false;
+      // ⑦ 過去の会（開催日が今日0:00より前）は非表示
+      if (s.date < today) return false;
+      // ⑦④ 満員（予約数≧定員）は非表示。ただし自分が予約済みの会は残す（④＝空きが出れば自動で再表示）
+      if ((sessionCounts[s.id] ?? 0) >= s.capacity && !booked.has(s.id)) return false;
       return true;
     });
-  }, [filter, visibleSessions, searchQuery, priceRange, priceMin, priceMax, dateFrom, dateTo]);
+  }, [filter, visibleSessions, searchQuery, priceRange, priceMin, priceMax, dateFrom, dateTo, sessionCounts, bookings]);
 
   // 適用中のフィルタ数（リセットボタン表示用）
   const activeFilterCount = (

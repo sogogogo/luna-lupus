@@ -206,22 +206,22 @@ export async function seedAnnouncements(entriesArr) {
 }
 
 // =====================================================================
-// 日程調整の確定を原子的にコミット（会作成＋参加者登録＋ポール更新を1トランザクション）
+// 日程調整の確定を原子的にコミット（複数会の作成＋ポール更新を1トランザクション）
+//   複数日確定対応: sessions[] を一括で set（各 id は呼び出し側で pollId 由来の決定論的ID
+//   `s_${pollId}_${index}` にしてあるため、万一2回走っても同じドキュメントに上書き＝二重作成にならない）。
 //   #3-A 二重確定防止: tx内でpollを読み、status!=='open' なら 'already-confirmed' で中断。
-//   session/participant の id は呼び出し側で pollId 由来の決定論的ID（s_${pollId} 等）にしてあるため、
-//   万一2回走っても同じドキュメントに上書き＝会の二重作成にならない（冪等）。
+//   参加者の自動登録は廃止（確定後、参加者が各自で予約する＝先着）。
 //   告知は非クリティカルのためtx外（呼び出し側でtx成功後に実行）。
 //   失敗時は 'poll-not-found' / 'already-confirmed' を Error.message で投げる。
 // =====================================================================
-export async function commitPollConfirmation({ session, participants, pollId, pollPatch }) {
+export async function commitPollConfirmation({ sessions, pollId, pollPatch }) {
   await runTransaction(db, async (tx) => {
     const pollRef = doc(db, SCHEDULE_POLLS_COL, String(pollId));
     const pollSnap = await tx.get(pollRef); // 読み取りは書き込みより前（Firestoreトランザクション規則）
     if (!pollSnap.exists()) throw new Error('poll-not-found');
     if (pollSnap.data().status !== 'open') throw new Error('already-confirmed');
-    tx.set(doc(db, SESSIONS, String(session.id)), clean(session));
-    (participants || []).forEach((p) => {
-      tx.set(doc(db, PARTICIPANTS_COL, String(p.id)), clean(p));
+    (sessions || []).forEach((s) => {
+      tx.set(doc(db, SESSIONS, String(s.id)), clean(s));
     });
     tx.update(pollRef, clean(pollPatch));
   });

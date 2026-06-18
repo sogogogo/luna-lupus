@@ -199,7 +199,8 @@ const ROLES_BY_PLAYERS = {
 //   - brand は BRAND のキー / plan は PLAN_DEFS のキー（想定プラン・任意）
 //   - candidateDates: 候補日時の配列。pollResponses.answers のキーはこの配列の添字(0,1,2...)に対応
 //   - status: 'open'（回答受付中）/ 'closed'（締切）/ 'confirmed'（開催日確定）
-//   - confirmedIndex: 確定した candidateDates の添字（未確定は null）
+//   - confirmedIndexes: 確定した candidateDates の添字配列（複数日確定対応・未確定は null）。
+//     旧データは単数 confirmedIndex を持つことがある→ confirmedIndexesOf() で吸収
 //   - invitedCustomerIds: 招待制なら customerId 配列 / null = 公開
 const SCHEDULE_POLLS_INIT = [
   {
@@ -379,6 +380,10 @@ const todayISO = () => {
   const dd = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${dd}`;
 };
+
+// 確定済み候補日の添字リスト。複数日確定は confirmedIndexes[]、旧データの単数 confirmedIndex にも後方互換。
+const confirmedIndexesOf = (poll) =>
+  poll?.confirmedIndexes ?? (poll?.confirmedIndex != null ? [poll.confirmedIndex] : []);
 
 // 返金対象か：開催日(0:00)より前にキャンセルした分のみ返金。当日以降のキャンセルは返金不要。
 // p.cancelledAt は 'YYYY-MM-DD HH:mm'。cancelledAt 不明な旧データは安全側で返金対象とみなす。
@@ -3787,7 +3792,8 @@ function PollCard({ poll, pollResponses, onClick }) {
   const { responded, target, ratio } = pollProgress(poll, pollResponses, customers.length);
   const left = daysUntil(poll.deadline);
   const confirmed = poll.status === 'confirmed';
-  const confDate = confirmed && poll.confirmedIndex != null ? poll.candidateDates[poll.confirmedIndex] : null;
+  const confIdxs = confirmed ? confirmedIndexesOf(poll).filter(i => poll.candidateDates[i]) : [];
+  const confDate = confIdxs.length === 1 ? poll.candidateDates[confIdxs[0]] : null;
 
   const deadlineLabel = left == null ? '—'
     : left > 0 ? `推奨期限まで残${left}日`
@@ -3841,7 +3847,7 @@ function PollCard({ poll, pollResponses, onClick }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         {confirmed ? (
           <span className="num" style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#4a9968' }}>
-            <CheckCircle2 size={12} /> {confDate ? `${fmtMD(confDate.date, confDate.day)} で確定` : '確定済み'}
+            <CheckCircle2 size={12} /> {confDate ? `${fmtMD(confDate.date, confDate.day)} で確定` : confIdxs.length > 1 ? `${confIdxs.length}日程で確定` : '確定済み'}
           </span>
         ) : poll.status === 'closed' ? (
           <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#9499a8' }}>
@@ -3865,17 +3871,21 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
   const [editing, setEditing] = useState(null); // { mode: 'create' } | { mode: 'edit', poll }
   const [deletingPoll, setDeletingPoll] = useState(null); // 削除確認対象
 
-  // 候補日を確定 → 会作成・◯回答者を参加者登録・ポール更新 を「1つの writeBatch」で原子的に。
-  // 全部成功か全部失敗か（中途半端な状態・会の二重作成を防止）。告知は非クリティカルでバッチ外。
-  const confirmPoll = async (poll, colIdx, opts = {}) => {
+  // 候補日（複数可）を確定 → 選んだ日それぞれに会を作成・ポール更新 を「1トランザクション」で原子的に。
+  // 全部成功か全部失敗か（中途半端な状態・会の二重作成を防止）。参加者の自動登録は廃止（各自で予約）。
+  const confirmPoll = async (poll, colIdxList, opts = {}) => {
     // 二重確定ガード（フロント先回り）：既に確定済みなら何もしない。
     // ※最終防衛は commitPollConfirmation の tx内 status チェック（DBレベル）。戻り値 true/false で成否を返す。
     if (poll.status === 'confirmed') {
       toast.push('この日程調整は既に確定済みです', 'warn');
       return false;
     }
+    const indexes = [...new Set(colIdxList || [])].filter(i => poll.candidateDates[i]).sort((a, b) => a - b);
+    if (indexes.length === 0) {
+      toast.push('確定する日程を1つ以上選んでください', 'warn');
+      return false;
+    }
 
-    const cd = poll.candidateDates[colIdx];
     const planKey = poll.plan || opts.planKey || null;
     const planDef = planKey ? PLAN_DEFS[planKey] : null;
     const brandKey = planDef ? planDef.brand : poll.brand;
@@ -3887,41 +3897,33 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
     // （「〇〇の日程調整」という調整向けタイトルが通常会の名前に化けるのを防ぐ）
     const carryTitle = brandKey === 'event' || brandKey === 'closed';
 
-    // 決定論的ID：pollId 由来にして、万一2回走っても同じ会IDに上書き＝二重作成しない（冪等）
-    const sessionId = `s_${poll.id}`;
-    const newSession = {
-      id: sessionId,
-      date: cd.date, day: cd.day, time: cd.time,
-      plan: planKey,
-      gm: 'GM未設定', // 確定後に会の編集画面で設定する運用
-      platform: planDef ? (planDef.mode === 'offline' ? '対面' : 'Zoom') : 'Zoom',
-      meetingUrl: null,
-      guestName: null,
-      guestBio: null,
-      customTitle: carryTitle ? (poll.title || null) : null,
-      customPrice,
-      invitedCustomerIds: poll.invitedCustomerIds || [],
-      status: 'open',
-      fromPollId: poll.id, // 由来をたどれるように
-    };
-
-    // ◯回答者を参加者として自動登録（未払い）
-    const yesResponders = pollResponses.filter(r => r.pollId === poll.id && r.answers && r.answers[colIdx] === 'yes');
-    const newParticipants = yesResponders.map(r => ({
-      id: `p${sessionId}_${r.customerId}`,
-      sessionId, customerId: r.customerId,
-      name: r.name, handle: r.handle,
-      paid: false, paidAt: null,
-      cancelled: false, refunded: false, role: null,
-    }));
+    // 選んだ各候補日 → 会。決定論的ID `s_${pollId}_${idx}`（再実行で同じIDに上書き＝二重作成しない）
+    const newSessions = indexes.map((colIdx) => {
+      const cd = poll.candidateDates[colIdx];
+      return {
+        id: `s_${poll.id}_${colIdx}`,
+        date: cd.date, day: cd.day, time: cd.time,
+        plan: planKey,
+        gm: 'GM未設定', // 確定後に会の編集画面で設定する運用
+        platform: planDef ? (planDef.mode === 'offline' ? '対面' : 'Zoom') : 'Zoom',
+        meetingUrl: null,
+        guestName: null,
+        guestBio: null,
+        customTitle: carryTitle ? (poll.title || null) : null,
+        customPrice,
+        invitedCustomerIds: poll.invitedCustomerIds || [],
+        status: 'open',
+        fromPollId: poll.id,       // 由来をたどれるように
+        fromPollIndex: colIdx,     // 候補日の添字（◯回答との突合・優先表示用＝フェーズB）
+      };
+    });
 
     try {
-      // 会作成＋参加者登録＋ポール更新を1トランザクションで原子的にコミット（tx内で二重確定を弾く）
+      // 複数会の作成＋ポール更新を1トランザクションで原子的にコミット（tx内で二重確定を弾く）
       await commitPollConfirmation({
-        session: newSession,
-        participants: newParticipants,
+        sessions: newSessions,
         pollId: poll.id,
-        pollPatch: { status: 'confirmed', confirmedIndex: colIdx, plan: planKey, brand: brandKey },
+        pollPatch: { status: 'confirmed', confirmedIndexes: indexes, plan: planKey, brand: brandKey },
       });
     } catch (e) {
       // tx全体が未反映＝不整合なし。二重確定（並行/別タブ）は専用メッセージに
@@ -3934,13 +3936,14 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
     }
 
     // 告知センター履歴（非クリティカル。失敗してもログのみで確定自体は成立済み）
+    const dateLabels = indexes.map(i => fmtMD(poll.candidateDates[i].date, poll.candidateDates[i].day)).join('・');
     addAnnounce({
       date: nowISO(), channel: '日程確定', target: poll.title,
-      subject: `日程調整「${poll.title}」を確定（${fmtMD(cd.date, cd.day)}開催）`,
-      count: newParticipants.length,
+      subject: `日程調整「${poll.title}」を確定（${dateLabels} 開催）`,
+      count: indexes.length,
     });
 
-    toast.push(`日程を確定し、参加者 ${newParticipants.length} 名を登録しました`, 'success');
+    toast.push(`日程を確定し、${indexes.length} 件の会を作成しました`, 'success');
     return true;
   };
 
@@ -3990,7 +3993,7 @@ function SchedulePollsAdmin({ schedulePolls, pollResponses, addSchedulePoll, upd
   if (selectedPoll) {
     return (
       <>
-        <PollAggregateView poll={selectedPoll} pollResponses={pollResponses} onBack={() => setSelected(null)} onEdit={() => setEditing({ mode: 'edit', poll: selectedPoll })} onConfirm={(colIdx, opts) => confirmPoll(selectedPoll, colIdx, opts)} onDelete={() => setDeletingPoll(selectedPoll)} />
+        <PollAggregateView poll={selectedPoll} pollResponses={pollResponses} onBack={() => setSelected(null)} onEdit={() => setEditing({ mode: 'edit', poll: selectedPoll })} onConfirm={(idxList, opts) => confirmPoll(selectedPoll, idxList, opts)} onDelete={() => setDeletingPoll(selectedPoll)} />
         {editModal}
         {deleteModal}
       </>
@@ -4085,7 +4088,7 @@ function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
   const plan = planKey ? PLAN_DEFS[planKey] : null;
   const brand = plan ? BRAND[plan.brand] : null;
   const accent = brand ? brand.primary : '#6b5dc7';
-  // 確定済みポールは候補日の添字が sessions/通知と紐づくため、候補日を変更不可にする（confirmedIndex ズレ防止）
+  // 確定済みポールは候補日の添字が sessions/通知と紐づくため、候補日を変更不可にする（confirmedIndexes ズレ防止）
   const lockedCandidates = isEdit && initial?.status === 'confirmed';
 
   // 候補日の操作
@@ -4131,7 +4134,7 @@ function SchedulePollFormModal({ mode, initial, onSave, onClose }) {
       createdAt: isEdit ? initial.createdAt : new Date().toISOString().slice(0, 16).replace('T', ' '),
       candidateDates,
       status: isEdit ? initial.status : 'open',
-      confirmedIndex: isEdit ? (initial.confirmedIndex ?? null) : null,
+      confirmedIndexes: isEdit ? (initial.confirmedIndexes ?? (initial.confirmedIndex != null ? [initial.confirmedIndex] : null)) : null,
       invitedCustomerIds: targetMode === 'selected' ? Array.from(invited) : null,
       deadline: deadline || null,
       note: note.trim() || '',
@@ -4329,7 +4332,13 @@ const ANSWER_STYLE = {
 
 function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm, onDelete }) {
   const customers = useCustomers();
-  const [confirmingIndex, setConfirmingIndex] = useState(null);
+  const [selectedIdxs, setSelectedIdxs] = useState(() => new Set()); // 確定する候補日（複数可）
+  const [confirming, setConfirming] = useState(false);               // 確定モーダル開閉
+  const toggleIdx = (i) => setSelectedIdxs(prev => {
+    const n = new Set(prev);
+    n.has(i) ? n.delete(i) : n.add(i);
+    return n;
+  });
   const brand = BRAND[poll.brand];
   const accent = brand ? brand.primary : '#2c3140';
   const HILITE = '#eef7f1'; // 最有力候補の薄い緑
@@ -4359,9 +4368,9 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm, onD
   const isTop = (colIdx) => maxYes > 0 && colStats[colIdx].yes === maxYes;
 
   const respondedCount = targets.filter(c => resByCustomer[c.id]).length;
-  const confirmedDate = poll.status === 'confirmed' && poll.confirmedIndex != null ? poll.candidateDates[poll.confirmedIndex] : null;
-
   const alreadyConfirmed = poll.status === 'confirmed';
+  const confirmedIdxs = confirmedIndexesOf(poll).filter(i => poll.candidateDates[i]);
+  const confirmedDatesLabel = confirmedIdxs.map(i => fmtMD(poll.candidateDates[i].date, poll.candidateDates[i].day)).join('・');
 
   const th = { padding: '10px 12px', borderBottom: '2px solid #e8e5dd', fontSize: 11, fontWeight: 700, color: '#6b6e7a', whiteSpace: 'nowrap' };
   const td = { padding: '9px 12px', borderBottom: '1px solid #f0ede5', textAlign: 'center', fontSize: 13 };
@@ -4407,8 +4416,8 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm, onD
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, fontSize: 12, color: '#6b6e7a', fontWeight: 600 }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><CalendarDays size={13} /> 候補 <span className="num" style={{ color: '#2c3140', fontWeight: 700 }}>{poll.candidateDates.length}</span> 日程</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Users size={13} /> 回答 <span className="num" style={{ color: '#2c3140', fontWeight: 700 }}>{respondedCount}/{targets.length}</span> 人</span>
-          {confirmedDate
-            ? <span className="num" style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#4a9968', fontWeight: 700 }}><CheckCircle2 size={13} /> {fmtMD(confirmedDate.date, confirmedDate.day)} で確定</span>
+          {alreadyConfirmed
+            ? <span className="num" style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#4a9968', fontWeight: 700 }}><CheckCircle2 size={13} /> {confirmedDatesLabel} で確定</span>
             : <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Clock size={13} /> 推奨期限 <span className="num" style={{ color: '#2c3140', fontWeight: 700 }}>{poll.deadline}</span></span>}
         </div>
         {poll.note && <div style={{ marginTop: 10, fontSize: 11, color: '#9499a8' }}>{poll.note}</div>}
@@ -4478,21 +4487,27 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm, onD
                 ))}
               </tr>
             ))}
-            {/* 確定ボタン行 */}
+            {/* 確定選択行：各候補日に「確定する/しない」チェック（確定後は確定済みの印） */}
             <tr>
-              <td style={{ ...td, background: '#faf9f6', position: 'sticky', left: 0, borderBottom: 'none' }}></td>
+              <td style={{ ...td, background: '#faf9f6', position: 'sticky', left: 0, borderBottom: 'none', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#6b6e7a' }}>
+                {alreadyConfirmed ? '確定' : '確定する日'}
+              </td>
               {poll.candidateDates.map((cd, colIdx) => {
-                const isConfirmed = poll.confirmedIndex === colIdx;
-                const disabled = alreadyConfirmed; // 確定後は他候補での確定も不可
+                const isConfirmed = confirmedIdxs.includes(colIdx);
+                const checked = selectedIdxs.has(colIdx);
                 return (
                   <td key={colIdx} style={{ ...td, background: isTop(colIdx) ? HILITE : '#faf9f6', borderBottom: 'none', padding: '12px' }}>
-                    <button onClick={() => !disabled && setConfirmingIndex(colIdx)} disabled={disabled} style={{
-                      padding: '7px 10px', width: '100%',
-                      background: isConfirmed ? '#e6f3eb' : (disabled ? '#eceae4' : accent),
-                      color: isConfirmed ? '#4a9968' : (disabled ? '#b0ada5' : '#fff'),
-                      border: 'none', borderRadius: 8, fontSize: 11, fontWeight: 700,
-                      fontFamily: 'inherit', cursor: disabled ? 'default' : 'pointer', whiteSpace: 'nowrap',
-                    }}>{isConfirmed ? '確定済み' : 'この日で確定'}</button>
+                    {alreadyConfirmed ? (
+                      isConfirmed
+                        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 700, color: '#4a9968', background: '#e6f3eb', borderRadius: 6, padding: '4px 8px' }}><CheckCircle2 size={11} /> 確定</span>
+                        : <span style={{ fontSize: 11, color: '#c8c4ba' }}>—</span>
+                    ) : (
+                      <button onClick={() => toggleIdx(colIdx)} aria-pressed={checked} style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 22, height: 22, borderRadius: 6, cursor: 'pointer',
+                        border: `2px solid ${checked ? accent : '#d4d0c8'}`, background: checked ? accent : '#fff',
+                      }}>{checked && <Check size={13} color="#fff" strokeWidth={3} />}</button>
+                    )}
                   </td>
                 );
               })}
@@ -4501,13 +4516,30 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm, onD
         </table>
       </div>
 
-      {confirmingIndex != null && (
+      {/* 確定アクション（未確定時のみ）：選んだ複数日をまとめて確定。各日に会を作成（参加者は各自で予約） */}
+      {!alreadyConfirmed && (
+        <div style={{ marginTop: 14, padding: '14px 16px', background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 12, color: '#6b6e7a', fontWeight: 600 }}>
+            <span className="num" style={{ color: accent, fontWeight: 700 }}>{selectedIdxs.size}</span> 日程を選択中
+            <span style={{ fontSize: 11, color: '#9499a8', marginLeft: 8 }}>選んだ日それぞれに会を作成します（参加者は各自で予約）</span>
+          </div>
+          <button onClick={() => setConfirming(true)} disabled={selectedIdxs.size === 0} style={{
+            padding: '10px 18px', borderRadius: 8, border: 'none',
+            background: selectedIdxs.size === 0 ? '#e0ddd6' : `linear-gradient(135deg, ${accent}, ${brand ? brand.accent : '#3fb8d4'})`,
+            color: '#fff', cursor: selectedIdxs.size === 0 ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}><CheckCircle2 size={14} /> 選択した日程で確定（{selectedIdxs.size}日）</button>
+        </div>
+      )}
+
+      {confirming && (
         <PollConfirmModal
           poll={poll}
-          colIdx={confirmingIndex}
+          colIdxList={[...selectedIdxs].sort((a, b) => a - b)}
           pollResponses={pollResponses}
-          onConfirm={(opts) => onConfirm?.(confirmingIndex, opts)}
-          onClose={() => setConfirmingIndex(null)}
+          onConfirm={(opts) => onConfirm?.([...selectedIdxs].sort((a, b) => a - b), opts)}
+          onClose={() => setConfirming(false)}
         />
       )}
     </div>
@@ -4515,9 +4547,9 @@ function PollAggregateView({ poll, pollResponses, onBack, onEdit, onConfirm, onD
 }
 
 // ============ 日程調整（確定ダイアログ）============
-function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
+function PollConfirmModal({ poll, colIdxList, pollResponses, onConfirm, onClose }) {
   const { push } = useToast();
-  const cd = poll.candidateDates[colIdx];
+  const idxs = (colIdxList || []).filter(i => poll.candidateDates[i]); // 確定対象の候補日（複数可）
   // プラン未定なら確定時にプラン選択必須
   const [planKey, setPlanKey] = useState(poll.plan || '');
   const plan = planKey ? PLAN_DEFS[planKey] : null;
@@ -4528,10 +4560,9 @@ function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
   const [customPrice, setCustomPrice] = useState(poll.customPrice ?? '');
   const [submitting, setSubmitting] = useState(false); // 確定処理中の二重実行防止
 
-  // この候補日に対する回答内訳
+  // 候補日ごとの◯人数（目安表示）
   const responses = pollResponses.filter(r => r.pollId === poll.id);
-  const countBy = (val) => responses.filter(r => r.answers && r.answers[colIdx] === val).length;
-  const yesN = countBy('yes'), maybeN = countBy('maybe'), noN = countBy('no');
+  const yesCountOf = (i) => responses.filter(r => r.answers && r.answers[i] === 'yes').length;
 
   const planLabel = plan ? plan.label : poll.title;
   const canConfirm = (!needsPlan || planKey) && (!needsPrice || customPrice !== '') && !submitting;
@@ -4556,19 +4587,26 @@ function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
     }
   };
 
-  const checkLine = (color, text) => (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: '#2c3140', lineHeight: 1.6 }}>
-      <Check size={14} color={color} strokeWidth={3} style={{ marginTop: 2, flexShrink: 0 }} /> <span>{text}</span>
-    </div>
-  );
-
   return (
     <ModalShell onClose={onClose} maxWidth={440}>
       <ModalHeader title="日程を確定" icon={<CheckCircle2 size={16} />} onClose={onClose} accent={accent} />
       <div style={{ flex: 1, overflow: 'auto', padding: '18px 24px' }}>
-        <div style={{ fontSize: 13, color: '#2c3140', fontWeight: 600, lineHeight: 1.7, marginBottom: 16 }}>
-          「<span className="num" style={{ color: accent, fontWeight: 700 }}>{fmtMD(cd.date, cd.day)} {cd.time}</span>」で確定し、<br />
-          <span style={{ fontWeight: 700 }}>{planLabel}</span> として正式な会を作成します。
+        <div style={{ fontSize: 13, color: '#2c3140', fontWeight: 600, lineHeight: 1.7, marginBottom: 12 }}>
+          選んだ <span className="num" style={{ color: accent, fontWeight: 700 }}>{idxs.length}</span> 日程を
+          <span style={{ fontWeight: 700 }}> {planLabel} </span>として確定し、それぞれ正式な会を作成します。
+        </div>
+
+        {/* 確定する候補日の一覧（◯人数を目安表示） */}
+        <div style={{ display: 'grid', gap: 6, marginBottom: 16 }}>
+          {idxs.map(i => {
+            const cd = poll.candidateDates[i];
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 12px', background: '#f6f8f6', borderRadius: 8, border: '1px solid #e0e8e0' }}>
+                <span className="num" style={{ fontSize: 13, fontWeight: 700, color: '#2c3140' }}>{fmtMD(cd.date, cd.day)} {cd.time}</span>
+                <span style={{ fontSize: 11, color: '#4a9968', fontWeight: 700 }}>◯ {yesCountOf(i)} 名</span>
+              </div>
+            );
+          })}
         </div>
 
         {/* プラン選択（未定だった場合のみ・必須） */}
@@ -4596,10 +4634,9 @@ function PollConfirmModal({ poll, colIdx, pollResponses, onConfirm, onClose }) {
           </div>
         )}
 
-        <div style={{ display: 'grid', gap: 9, padding: '14px 16px', background: '#f6f8f6', borderRadius: 10, border: '1px solid #e0e8e0' }}>
-          {checkLine('#4a9968', <>◯回答した <b className="num">{yesN}</b> 名を参加者として自動登録</>)}
-          {checkLine('#c9962a', <>△回答した <b className="num">{maybeN}</b> 名には参加確認の通知を送る</>)}
-          {checkLine('#d44a4a', <>×回答した <b className="num">{noN}</b> 名には確定日のみ通知</>)}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '12px 14px', background: '#fef7e8', borderRadius: 10, border: '1px solid #f5d97a', fontSize: 11, color: '#6b6e7a', lineHeight: 1.7 }}>
+          <AlertCircle size={14} color="#c9962a" style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>参加者の自動登録は行いません。確定後、参加者が各自で好きな日の会を予約します（先着・1人1予約）。</span>
         </div>
       </div>
 

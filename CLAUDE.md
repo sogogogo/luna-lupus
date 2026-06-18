@@ -9,7 +9,8 @@
 - コンパニオンアプリ: 「N主宰人狼会 CAST」(役職配布アプリ / React Native) は別リポジトリ・別プロジェクト。本アプリとはデザインを統一するが、コードは独立
 
 ## 開発ステータス
-- 現在: **Phase 1 完了**（Firebase化＋日程調整＋セキュリティ＝運営者/参加者の二層アクセス）・Vercel運用中
+- 現在: **Phase 1 完了・本番公開済み**（Firebase化＋日程調整＋セキュリティ＝運営者/参加者の二層アクセス＋スマホ対応）
+- 本番URL: 参加者 `https://jinrou.vercel.app` ／ 管理 `https://jinrou.vercel.app/admin`（GitHub `sogogogo/luna-lupus` の main → Vercel 自動デプロイ）
 - 構成: フロントは **単一ファイル構成**（`src/App.jsx`）＋ `src/lib/`（firebase/firestore/functions/auth）＋ `functions/`（Cloud Functions・別npm）
 - 受託の**段階開発**: Phase 1=基本機能、Phase 2=配信の実配信・PayPay自動決済・顧客編集強化・配役履歴（→末尾「Phase構成」）
 
@@ -25,6 +26,10 @@
   - 画面間の移動導線は **isAdmin のときだけ**ヘッダーに出す（参加者は isAdmin にならないので絶対に見えない）: `/admin`で「参加者画面を見る」(`→/`)、`/`で「管理画面へ戻る」(`→/admin`)。旧「参加者/管理者トグル」「フッター運営者ログイン」は廃止
   - **Vercel**: SPA直アクセス（`/admin`）で404にならないよう `vercel.json` の rewrites で全パスを `/index.html` に向ける（必須）
 - 役職割り振りは管理アプリから分離し、専用アプリ『人狼会CAST』として別開発（管理画面の「役職割り振り」タブは案内パネルのみ表示。RoleAssignment/RolesList のコードはCAST移植参照用に残置）
+- **予約フロー（PayPay）**: 送金先は **ID案内方式**（`PAYPAY_ID = 'jinro0710'`）。個人マイコードQRは有効期限切れするため不採用
+- **ナビゲーション（スマホ/PC 出し分け）**: `useIsMobile()`（matchMedia `max-width:640px`）で構造を切替。**PC=上部タブ／スマホ=下部固定メニュー**（`BottomNav`, z-index:90）＋管理画面は右上 ≡（`AdminMenuDrawer`）で全7タブにアクセス。下部4項目＝参加者: ホーム/日程調整/マイページ/お知らせ、管理: ダッシュボード/会の管理/参加者・支払い/日程調整
+  - z-index 設計: トースト1000 ＞ ドロワー/ModalShell系モーダル200 ＞ 独自モーダル(お知らせ/招待)100 ＞ BottomNav 90 ＞ アクセントバー60 ＞ ヘッダー50。**下部メニューは全モーダルより下**（モーダル表示時は隠れる）。コンテンツが下部バーに隠れないよう対象画面に `.sp-navpad`（padding-bottom:88px）を付与
+  - レスポンシブ方式: **第1段階＝CSSメディアクエリ**（`@media (max-width:640px)`＋`!important` で inline style を上書き＝見た目調整）、**第2段階＝`useIsMobile` で条件レンダリング**（ナビ構造そのものを出し分け）。元々 inline style 中心でメディアクエリ皆無だった点に注意
 
 ## アーキテクチャ（Firebase / データアクセス二層）
 - バックエンド: **Firebase**（Firestore + Auth）。プロジェクト `n-jinrou-kanri` / リージョン **asia-northeast1（東京）** / **Blaze プラン**
@@ -139,6 +144,7 @@
   - `firebase-tools` は**ルート package.json に入れない**（Vercel ビルドを重くしないため）＝常に `npx firebase-tools` 経由
   - ログイン/シークレット設定は対話 → セッション内なら `! npx firebase-tools login`（**`!` の後に半角スペース必須**。連結するとエラー）
 - ローカル確認: `npm run dev` / ビルド検証: `npm run build`（＋ `npx eslint src/` で no-undef / no-unused-vars を確認）
+- **本番公開手順（記録）**: ①Vercel に `VITE_FIREBASE_*`（6キー）を登録 → ②`git push`（フロントは自動反映）→ ③Functions 変更時のみ `npx firebase-tools deploy --only functions` → ④**Firebase Authentication の「承認済みドメイン」に本番ドメインを追加**（Google ログインに必須・忘れると本番でログイン不可）
 
 ## 作業フロー
 1. 計画（/plan）：既存コードを読んで影響範囲を把握
@@ -167,6 +173,7 @@
 7. **購読カットの順序**：参加者の読み取りを窓口化（getPublicData/getMyData）**してから**購読を切る。逆順だと参加者画面が無限ローディング
 8. **X ハンドル照合（既存客の移行）**：正規化＝先頭の `@`/`＠` 除去 → 全空白除去（全角含む）→ 小文字化。入力側と既存 `customers` 側の**両方に適用**してから照合。なりすまし対策＝既に別 uid にリンク済みの顧客は奪えない（トランザクションで再確認、競合時は新規作成）
 9. **ログインユーザーのデータを保持する Provider は uid 切替も検知して即 clear**：`ParticipantProvider` 等は「ログアウト（user=null）」だけでなく「A→B の直接切替（uid 変化）」も検知しないと、新データ取得までの数秒間、前ユーザーの個人情報（支払い等）が表示され混線する。対策＝`useRef` で uid を追跡し切替検知で即 `clear()`＋`loading` 中は古いデータを描画しない（共有端末で実害あり）
+10. **plan/brand の「二形態」は構造的な弱点（繰り返し発生）**：session の `plan` は**生データ＝文字列キー** / **`enrichSession` 後＝オブジェクト**の2形態を取る。コードがどちらを持っているか見失うと `PLAN_DEFS[オブジェクト]` が undefined → `undefined.brand` でクラッシュ（これまで複数回：参加者ホーム／カレンダー経由の会詳細・編集モーダル）。鉄則＝enrich済みを再 enrich しない・**enrich済みを「生データ前提」の関数（`SessionFormModal` 等）に渡さない**・各画面に渡す session が「生」か「enrich済み」か常に意識する。多層防御＝consumer 側で `s.brand || FALLBACK_BRAND`、plan 正規化（オブジェクトなら `label` から文字列キーへ）、`PLAN_DEFS[...] || フォールバック`。根本対応案＝plan 正規化を1箇所に集約 or 「生/enrich済み」を型で区別するラッパーを作れば曖昧さ自体を解消できる（現状は対症療法のパッチを重ねている状態）
 
 ## Phase構成（受託の段階開発・進行中）
 - **Phase 1（今回・完了）**: 予約・顧客・支払い管理・日程調整・役職割り振りの基本機能、PayPay 自己申告（レベル2＝送金自己申告→運営者確認）、Firebase化＋二層セキュリティ

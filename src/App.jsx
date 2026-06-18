@@ -380,6 +380,15 @@ const todayISO = () => {
   return `${y}-${m}-${dd}`;
 };
 
+// 返金対象か：開催日(0:00)より前にキャンセルした分のみ返金。当日以降のキャンセルは返金不要。
+// p.cancelledAt は 'YYYY-MM-DD HH:mm'。cancelledAt 不明な旧データは安全側で返金対象とみなす。
+const isRefundDue = (p, sessionDate) => {
+  if (!p || !p.cancelled || !p.paid || p.refunded) return false;
+  const cancelDay = p.cancelledAt ? String(p.cancelledAt).slice(0, 10) : null;
+  if (!cancelDay || !sessionDate) return true;
+  return cancelDay < sessionDate; // 開催日より前のキャンセルのみ返金
+};
+
 // スマホ幅（640px以下）かどうかを返すフック。幅変化に追従（リサイズ/回転で再評価）。
 // PC/スマホでナビ構造を出し分けるために使用（第2段階：下部固定メニュー）
 function useIsMobile(maxWidth = 640) {
@@ -3137,8 +3146,8 @@ function CancelSection({ session, myParticipant, cancelBooking }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
-  const isToday = session.date === '2026-05-02';
-  const refundable = !isToday;
+  // 開催日(0:00)より前のキャンセルのみ返金可。当日以降は返金不可。
+  const refundable = !!session.date && todayISO() < session.date;
 
   const handleCancel = async () => {
     if (busy) return;
@@ -3161,7 +3170,7 @@ function CancelSection({ session, myParticipant, cancelBooking }) {
           <XCircle size={14} /> キャンセル済み
         </div>
         <div style={{ fontSize: 10, color: '#6b6e7a', marginTop: 3 }}>
-          {myParticipant.refunded ? '返金処理済み' : '返金処理中'}
+          {myParticipant.refunded ? '返金処理済み' : isRefundDue(myParticipant, session.date) ? '返金処理中' : '当日キャンセル（返金なし）'}
         </div>
       </div>
     );
@@ -3175,7 +3184,7 @@ function CancelSection({ session, myParticipant, cancelBooking }) {
           <span style={{ fontSize: 12, color: '#d97757', fontWeight: 700 }}>キャンセルしますか？</span>
         </div>
         <div style={{ fontSize: 11, color: '#6b6e7a', lineHeight: 1.7, marginBottom: 12 }}>
-          {refundable ? '前日までのキャンセルのため、参加費は全額返金されます。' : '当日キャンセルのため、参加費の返金はできません。'}
+          {refundable ? '前日までのキャンセルのため、参加費は全額返金されます。' : '開催当日のキャンセルは返金できません。'}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setConfirming(false)} style={{
@@ -4621,7 +4630,8 @@ function Dashboard({ sessions, participants }) {
   }, 0);
   const totalBookings = participants.filter(p => upcoming.some(s => s.id === p.sessionId) && !p.cancelled).length;
   const unpaid = participants.filter(p => upcoming.some(s => s.id === p.sessionId) && !p.cancelled && !p.paid).length;
-  const refundsDue = participants.filter(p => p.cancelled && !p.refunded && p.paid).length;
+  // 返金処理待ち＝開催日前キャンセル分のみ（当日以降キャンセルは返金不要）
+  const refundsDue = participants.filter(p => isRefundDue(p, sessions.find(x => x.id === p.sessionId)?.date)).length;
 
   // ブランド別売上
   const byBrand = {};
@@ -5325,9 +5335,9 @@ function PaymentsAdmin({ sessions, participants, updateParticipant }) {
     let totalCollected = 0, totalUnpaid = 0, totalRefundDue = 0, totalRefunded = 0;
     monthSessions.forEach(s => {
       participants.filter(p => p.sessionId === s.id).forEach(p => {
-        if (p.cancelled && p.paid && !p.refunded) totalRefundDue += s.price;
+        if (isRefundDue(p, s.date)) totalRefundDue += s.price;            // 開催日前キャンセル＝要返金
         else if (p.cancelled && p.refunded) totalRefunded += s.price;
-        else if (p.paid) totalCollected += s.price;
+        else if (p.paid) totalCollected += s.price;                       // 当日以降キャンセル(返金不要)もここ＝売上保持
         else if (!p.paid && !p.cancelled) totalUnpaid += s.price;
       });
     });
@@ -5361,14 +5371,14 @@ function PaymentsAdmin({ sessions, participants, updateParticipant }) {
         {monthSessions.map(s => {
           let sessionParts = participants.filter(p => p.sessionId === s.id);
           if (filter === 'unpaid') sessionParts = sessionParts.filter(p => !p.paid && !p.cancelled);
-          if (filter === 'refund') sessionParts = sessionParts.filter(p => p.cancelled && p.paid && !p.refunded);
+          if (filter === 'refund') sessionParts = sessionParts.filter(p => isRefundDue(p, s.date));
           if (sessionParts.length === 0 && filter !== 'all') return null;
 
           const isOpen = expandedId === s.id;
           const totalParts = participants.filter(p => p.sessionId === s.id);
           const paidCount = totalParts.filter(p => p.paid && !p.cancelled).length;
           const unpaidCount = totalParts.filter(p => !p.paid && !p.cancelled).length;
-          const refundDueCount = totalParts.filter(p => p.cancelled && p.paid && !p.refunded).length;
+          const refundDueCount = totalParts.filter(p => isRefundDue(p, s.date)).length;
 
           return (
             <div key={s.id} className="resp-scroll-x" style={{
@@ -5442,8 +5452,8 @@ function ParticipantRow({ idx, participant, session, updateParticipant }) {
   const ps = paymentStatusOf(p); // 'unpaid' | 'reported' | 'confirmed'
   let statusColor, statusLabel, statusIcon;
   if (p.cancelled && p.refunded) { statusColor = '#9499a8'; statusLabel = '返金済'; statusIcon = <CheckCircle2 size={11} />; }
-  else if (p.cancelled && p.paid && !p.refunded) { statusColor = '#d44a4a'; statusLabel = '返金待ち'; statusIcon = <RotateCcw size={11} />; }
-  else if (p.cancelled) { statusColor = '#9499a8'; statusLabel = 'キャンセル'; statusIcon = <XCircle size={11} />; }
+  else if (isRefundDue(p, session.date)) { statusColor = '#d44a4a'; statusLabel = '返金待ち'; statusIcon = <RotateCcw size={11} />; } // 開催日前キャンセル＝要返金
+  else if (p.cancelled) { statusColor = '#9499a8'; statusLabel = 'キャンセル'; statusIcon = <XCircle size={11} />; } // 当日以降キャンセルもここ（返金不要）
   else if (ps === 'confirmed') { statusColor = '#3a8c5b'; statusLabel = '入金確認済'; statusIcon = <CheckCircle2 size={11} />; }
   else if (ps === 'reported') { statusColor = '#c9962a'; statusLabel = '送金申告済'; statusIcon = <Clock size={11} />; }
   else { statusColor = '#e8645f'; statusLabel = '未送金'; statusIcon = <AlertCircle size={11} />; }
@@ -5505,7 +5515,7 @@ function ParticipantRow({ idx, participant, session, updateParticipant }) {
             color: '#3a8c5b', borderRadius: 5, cursor: 'pointer', fontFamily: 'inherit', fontSize: 10, fontWeight: 700,
           }}>入金確認</button>
         )}
-        {p.cancelled && p.paid && !p.refunded && (
+        {isRefundDue(p, session.date) && (
           <button onClick={() => setConfirmKind('refund')} style={{
             padding: '5px 9px', background: '#fce8e0', border: '1px solid #f5c5b6',
             color: '#d44a4a', borderRadius: 5, cursor: 'pointer', fontFamily: 'inherit', fontSize: 10, fontWeight: 700,

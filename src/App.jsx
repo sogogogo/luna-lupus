@@ -2114,6 +2114,7 @@ function DaySessionsPopup({ date, sessions, countOf = () => 0, onClose, onSelect
         {sessions.map((s, i) => {
           const cnt = countOf(s.id);
           const remaining = s.capacity - cnt;
+          const brand = s.brand || FALLBACK_BRAND; // 念のため：brand 欠落でも落ちない
           return (
             <div
               key={s.id}
@@ -2121,19 +2122,19 @@ function DaySessionsPopup({ date, sessions, countOf = () => 0, onClose, onSelect
               style={{
                 padding: '14px 24px', cursor: 'pointer',
                 borderBottom: i < sessions.length - 1 ? '1px solid #f5f3ed' : 'none',
-                borderLeft: `3px solid ${s.brand.primary}`,
+                borderLeft: `3px solid ${brand.primary}`,
                 transition: 'background 0.15s',
                 display: 'flex', alignItems: 'center', gap: 12,
               }}
               onMouseEnter={(e) => e.currentTarget.style.background = '#fafaf6'}
               onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
             >
-              {s.brand.icon && (
-                <img src={s.brand.icon} alt="" style={{ width: 36, height: 36, objectFit: 'contain', flexShrink: 0 }} />
+              {brand.icon && (
+                <img src={brand.icon} alt="" style={{ width: 36, height: 36, objectFit: 'contain', flexShrink: 0 }} />
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 10, color: s.brand.primary, fontWeight: 700, marginBottom: 2 }}>
-                  {s.brand.name}
+                <div style={{ fontSize: 10, color: brand.primary, fontWeight: 700, marginBottom: 2 }}>
+                  {brand.name}
                 </div>
                 <div className="maru" style={{ fontSize: 14, fontWeight: 700, color: '#2c3140', marginBottom: 4 }}>
                   {s.title}
@@ -2143,7 +2144,7 @@ function DaySessionsPopup({ date, sessions, countOf = () => 0, onClose, onSelect
                 </div>
               </div>
               <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                <div className="num" style={{ fontSize: 14, fontWeight: 700, color: s.brand.primary }}>
+                <div className="num" style={{ fontSize: 14, fontWeight: 700, color: brand.primary }}>
                   {fmtYen(s.price)}
                 </div>
                 <div className="num" style={{ fontSize: 10, color: remaining <= 3 ? '#e8645f' : '#9499a8', marginTop: 2, fontWeight: 600 }}>
@@ -2778,9 +2779,11 @@ function paymentStatusOf(p) {
 }
 
 // ============ セッション詳細 ============
-function SessionDetail({ session, onBack, onBook, myParticipant, cancelBooking, reportBooking }) {
+function SessionDetail({ session: rawSession, onBack, onBook, myParticipant, cancelBooking, reportBooking }) {
   const toast = useToast();
-  const b = session.brand;
+  // どんな経路（カレンダー/一覧）で渡っても brand を保証：enrichSession は冪等。最終防御で FALLBACK_BRAND
+  const session = enrichSession(rawSession) || rawSession || {};
+  const b = session.brand || FALLBACK_BRAND;
   const isAlreadyBooked = myParticipant && !myParticipant.cancelled;
   const role = myParticipant?.role;
   const payStatus = paymentStatusOf(myParticipant);
@@ -4927,7 +4930,8 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
           sessions={popupSessions}
           countOf={(sid) => participants.filter(p => p.sessionId === sid && !p.cancelled).length}
           onClose={() => setPopupDate(null)}
-          onSelect={(s) => { setEditingSession(s); }}
+          // 編集モーダルには生データ（plan=文字列キー）を渡す。enrich済みを渡すと PLAN_DEFS[オブジェクト]=undefined で落ちる
+          onSelect={(s) => { setEditingSession(sessions.find(x => String(x.id) === String(s.id)) || s); }}
         />
       )}
 
@@ -4952,7 +4956,14 @@ function SessionsAdmin({ sessions, participants, updateSession, addSession, dele
 function SessionFormModal({ mode, initial, onSave, onClose }) {
   const { push } = useToast();
   const isEdit = mode === 'edit';
-  const initialPlan = initial?.plan || 'okiraku_zoom_10';
+  // initial.plan が enrich済み（オブジェクト）でも壊れないよう、必ず PLAN_DEFS の文字列キーへ正規化
+  const rawInitialPlan = initial?.plan;
+  const initialPlan =
+    typeof rawInitialPlan === 'string' && PLAN_DEFS[rawInitialPlan] ? rawInitialPlan
+    : (rawInitialPlan && typeof rawInitialPlan === 'object'
+        ? Object.keys(PLAN_DEFS).find(k => PLAN_DEFS[k].label === rawInitialPlan.label)
+        : null)
+      || 'okiraku_zoom_10';
 
   const [planKey, setPlanKey] = useState(initialPlan);
   const [date, setDate] = useState(initial?.date || '2026-05-25');
@@ -4965,8 +4976,8 @@ function SessionFormModal({ mode, initial, onSave, onClose }) {
   const [customTitle, setCustomTitle] = useState(initial?.customTitle || '');
   const [customPrice, setCustomPrice] = useState(initial?.customPrice ?? '');
 
-  const plan = PLAN_DEFS[planKey];
-  const brand = BRAND[plan.brand];
+  const plan = PLAN_DEFS[planKey] || PLAN_DEFS['okiraku_zoom_10']; // 不正キーでも落ちないよう最終防御
+  const brand = BRAND[plan.brand] || FALLBACK_BRAND;
   const needsCustomPrice = plan.price === null;
   const needsCustomTitle = plan.brand === 'event' || plan.brand === 'closed';
   const isOnline = plan.mode === 'online';

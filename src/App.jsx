@@ -3604,7 +3604,7 @@ function PhaseNote({ info }) {
 function BottomNav({ items }) {
   return (
     <nav style={{
-      position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 120,
+      position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 90,
       background: 'rgba(255,255,255,0.97)', backdropFilter: 'blur(12px)',
       borderTop: '1px solid #e8e5dd',
       display: 'flex', justifyContent: 'space-around', alignItems: 'stretch',

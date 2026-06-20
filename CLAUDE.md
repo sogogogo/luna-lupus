@@ -30,6 +30,11 @@
 - **ナビゲーション（スマホ/PC 出し分け）**: `useIsMobile()`（matchMedia `max-width:640px`）で構造を切替。**PC=上部タブ／スマホ=下部固定メニュー**（`BottomNav`, z-index:90）＋管理画面は右上 ≡（`AdminMenuDrawer`）で全7タブにアクセス。下部4項目＝参加者: ホーム/日程調整/マイページ/お知らせ、管理: ダッシュボード/会の管理/参加者・支払い/日程調整
   - z-index 設計: トースト1000 ＞ ドロワー/ModalShell系モーダル200 ＞ 独自モーダル(お知らせ/招待)100 ＞ BottomNav 90 ＞ アクセントバー60 ＞ ヘッダー50。**下部メニューは全モーダルより下**（モーダル表示時は隠れる）。コンテンツが下部バーに隠れないよう対象画面に `.sp-navpad`（padding-bottom:88px）を付与
   - レスポンシブ方式: **第1段階＝CSSメディアクエリ**（`@media (max-width:640px)`＋`!important` で inline style を上書き＝見た目調整）、**第2段階＝`useIsMobile` で条件レンダリング**（ナビ構造そのものを出し分け）。元々 inline style 中心でメディアクエリ皆無だった点に注意
+- **日程調整の確定（複数日対応）**: 各候補日にチェック → 選択した日数ぶんの会を作成（`commitPollConfirmation` が複数 session を1トランザクションで原子的に set＋poll更新。決定論ID `s_${pollId}_${idx}`）。**確定時に参加者は自動登録しない**（空の会＝各自で先着予約・1人1予約に統一）。会に `fromPollId`/`fromPollIndex` を保持。`confirmedIndex`（単数）→ `confirmedIndexes`（配列）に変更、後方互換は `confirmedIndexesOf()` で吸収
+- **◯した日の優先表示**: 参加者ホーム上部に、自分が日程調整で◯(yes)と答えた確定会を「あなたが参加できる日が決まりました」として優先表示（過去・満員は除外）。会の `fromPollId`/`fromPollIndex` と自分の回答 `answers` を突合（`toPublicSession` が両フィールドを公開）
+- **当日キャンセルの返金ルール**: 開催日0:00を基準に、それ以降のキャンセルは返金なし。判定は `isRefundDue(p, sessionDate)` に集約し、参加者表示・運営者の KPI/「要返金」フィルタ/売上集計をすべて統一（`cancelledAt` の日付 < 開催日 のみ返金対象）
+- **参加者の会一覧フィルタ**: 過去（開催日 < 今日0:00）・満員（予約数 ≧ 定員）の会は非表示。**ただし自分が予約済みの会は残す**（キャンセル導線）。キャンセルで空きが出れば `sessionCounts` 更新で自動再表示。判定は `todayISO()` と `sessionCounts`。※管理画面の一覧（開催予定/開催済みタブ）には影響しない
+- **更新通知（運営者向け）**: `adminMeta/notifications.paymentsSeenAt`（運営者が「参加者・支払い」を最後に見た時刻）**1つだけ**で管理。未確認の「キャンセル」「送金申告(=入金確認待ち)」件数をクライアントが `cancelledAt`/`reportedAt` と比較して算出し、**右上ベル＋赤バッジ＋内訳ポップオーバー**と**「参加者・支払い」タブのドット**（PC上部/スマホ下部ナビ/ドロワー）で控えめに表示。同タブを開くと既読。新規予約は通知しない。**既読フラグ方式は不採用**（participant を書き換えない＝書き込み最小化・Functions/ルール変更不要）
 
 ## アーキテクチャ（Firebase / データアクセス二層）
 - バックエンド: **Firebase**（Firestore + Auth）。プロジェクト `n-jinrou-kanri` / リージョン **asia-northeast1（東京）** / **Blaze プラン**
@@ -174,8 +179,11 @@
 8. **X ハンドル照合（既存客の移行）**：正規化＝先頭の `@`/`＠` 除去 → 全空白除去（全角含む）→ 小文字化。入力側と既存 `customers` 側の**両方に適用**してから照合。なりすまし対策＝既に別 uid にリンク済みの顧客は奪えない（トランザクションで再確認、競合時は新規作成）
 9. **ログインユーザーのデータを保持する Provider は uid 切替も検知して即 clear**：`ParticipantProvider` 等は「ログアウト（user=null）」だけでなく「A→B の直接切替（uid 変化）」も検知しないと、新データ取得までの数秒間、前ユーザーの個人情報（支払い等）が表示され混線する。対策＝`useRef` で uid を追跡し切替検知で即 `clear()`＋`loading` 中は古いデータを描画しない（共有端末で実害あり）
 10. **plan/brand の「二形態」は構造的な弱点（繰り返し発生）**：session の `plan` は**生データ＝文字列キー** / **`enrichSession` 後＝オブジェクト**の2形態を取る。コードがどちらを持っているか見失うと `PLAN_DEFS[オブジェクト]` が undefined → `undefined.brand` でクラッシュ（これまで複数回：参加者ホーム／カレンダー経由の会詳細・編集モーダル）。鉄則＝enrich済みを再 enrich しない・**enrich済みを「生データ前提」の関数（`SessionFormModal` 等）に渡さない**・各画面に渡す session が「生」か「enrich済み」か常に意識する。多層防御＝consumer 側で `s.brand || FALLBACK_BRAND`、plan 正規化（オブジェクトなら `label` から文字列キーへ）、`PLAN_DEFS[...] || フォールバック`。根本対応案＝plan 正規化を1箇所に集約 or 「生/enrich済み」を型で区別するラッパーを作れば曖昧さ自体を解消できる（現状は対症療法のパッチを重ねている状態）
+   - **実例（累計3回目）**：管理画面のカレンダーが `DaySessionsPopup` 経由で **enrich済み session** を編集モーダル `SessionFormModal`（生データ前提＝`PLAN_DEFS[plan]`）に渡しており、`PLAN_DEFS[オブジェクト]=undefined → undefined.brand` でクラッシュ。一覧経路は `setEditingSession(raw)` と生データを渡していたため無事だった（＝経路で「生/enrich済み」が混在していたのが原因）。対策＝カレンダーの `onSelect` で `sessions.find(id一致)` の**生データ**を渡す＋ `SessionFormModal`/`SessionDetail`/`DaySessionsPopup` に多層フォールバック
 
 ## Phase構成（受託の段階開発・進行中）
 - **Phase 1（今回・完了）**: 予約・顧客・支払い管理・日程調整・役職割り振りの基本機能、PayPay 自己申告（レベル2＝送金自己申告→運営者確認）、Firebase化＋二層セキュリティ
 - **Phase 2（今後）**: 告知の実配信（メール/SNS 連携）、PayPay 自動決済（レベル3）、顧客編集UI強化、役職割り振りの履歴保存・分析
+  - **参加者への能動的な確定通知**（メール/LINE 等の外部配信）。現状はアプリ内のフェーズB「◯した日の優先表示」でカバー。Phase 2 の「告知の実配信」に含めて実装予定
+  - **ゲスト会の抽選機能**：人気のゲスト会で希望者 > 定員のとき、希望日投票 → 抽選で振り分け。今回は先着で運用、抽選は Phase 2
 - 管理画面に **Phase 2 バッジ**で未実装/拡張予定を明示（`PHASE_NOTES` で一元管理。`planned`=Phase 2 予定/グレー、`expand`=拡張予定/淡色）。**参加者画面には出さない**

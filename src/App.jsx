@@ -1274,7 +1274,7 @@ function CustomerView({ brandFilter, setBrandFilter }) {
           { key: 'list', label: 'ホーム', icon: Home, active: step === 'list', onClick: () => setStep('list') },
           { key: 'polls', label: '日程調整', icon: ListChecks, active: step === 'polls' || step === 'pollAnswer', onClick: () => setStep('polls'), dot: myPolls.length > 0 },
           { key: 'mypage', label: 'マイページ', icon: User, active: step === 'mypage', onClick: () => setStep('mypage') },
-          { key: 'announce', label: 'お知らせ', icon: Bell, active: announceOpen, onClick: () => setAnnounceOpen(true), dot: true },
+          { key: 'announce', label: 'お知らせ', icon: Bell, active: announceOpen, onClick: () => setAnnounceOpen(true) },
         ]} />
       )}
       {announceOpen && <AnnouncementModal onClose={() => setAnnounceOpen(false)} />}
@@ -1378,7 +1378,6 @@ function CustomerView({ brandFilter, setBrandFilter }) {
           {!isMobile && (
             <button onClick={() => setAnnounceOpen(true)} style={{ ...btnGhost(), color: '#e8645f', borderColor: '#f5c5c2', position: 'relative' }}>
               <Bell size={14} /> お知らせ
-              <span style={{ position: 'absolute', top: 6, right: 6, width: 7, height: 7, borderRadius: '50%', background: '#e8645f' }} />
             </button>
           )}
         </div>
@@ -2795,12 +2794,10 @@ function Row({ icon, text, accent }) {
 }
 
 // ============ お知らせモーダル ============
+// 告知の実配信は Phase 2 予定。現状は空状態を表示。
+// ※将来 Phase 2: items を announcements（getPublicData 経由）から受け取る形に差し替え予定（下の map はそのまま流用可）。
 function AnnouncementModal({ onClose }) {
-  const items = [
-    { type: 'new', date: '5月2日', title: '5/30 クローズド会のご招待', body: 'VIP常連様限定の特別回を開催します。詳細はトップ画面の「INVITED ONLY」エリアからご確認ください。' },
-    { type: 'new', date: '5月2日', title: '5/16 アキバ人狼館での対面開催決定', body: '久々の対面開催です。お気楽人狼会・通常の参加費2,500円で承ります。' },
-    { type: 'remind', date: '5月1日', title: '5/8 お気楽10人村 開催3日前のリマインド', body: 'Zoomリンクは当日18時に再送します。お役職カードの確認はマイページから。' },
-  ];
+  const items = [];
 
   return (
     <div onClick={onClose} style={{
@@ -2820,6 +2817,11 @@ function AnnouncementModal({ onClose }) {
           </button>
         </div>
         <div>
+          {items.length === 0 && (
+            <div style={{ padding: '40px 24px', textAlign: 'center', color: '#9499a8', fontSize: 13 }}>
+              現在お知らせはありません
+            </div>
+          )}
           {items.map((it, i) => {
             const c = it.type === 'new' ? '#6b5dc7' : it.type === 'remind' ? '#e8645f' : '#5b9bd5';
             const lbl = it.type === 'new' ? '新着' : it.type === 'remind' ? 'リマインド' : 'お知らせ';
@@ -4893,16 +4895,6 @@ function Dashboard({ sessions, participants }) {
               </div>
             );
           })}
-
-          <div style={{ marginTop: 18, padding: 12, background: '#fef7e8', border: '1px solid #f5d97a', borderRadius: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10, color: '#c9962a', fontWeight: 700, marginBottom: 5 }}>
-              <AlertCircle size={11} /> ALERT
-            </div>
-            <div style={{ fontSize: 11, color: '#6b6e7a', lineHeight: 1.6 }}>
-              5/12 高橋由美様の誕生日。<br />
-              5/15 お気楽10人村は残9席、告知のタイミングです。
-            </div>
-          </div>
         </section>
       </div>
     </div>

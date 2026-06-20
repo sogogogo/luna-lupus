@@ -1145,12 +1145,13 @@ function CustomerView({ brandFilter, setBrandFilter }) {
   const isLoggedIn = !!myId;
 
   // 公開会（窓口・closed除外済み）＋ 自分が招待されたクローズド会（getMyData由来）
-  const sessionCounts = pub?.sessionCounts || {};
+  // useMemo で参照を安定させ、下流の filtered/myYesSessions が毎レンダリングで再計算されないようにする
+  const sessionCounts = useMemo(() => pub?.sessionCounts || {}, [pub]);
   const countOf = (sid) => sessionCounts[sid] ?? 0;
   // enrichSession は必ず brand を付与する（フォールバック含む）が、保険として brand 無しは除外（白画面防止）
-  const publicSessions = (pub?.sessions || []).map(enrichSession).filter(s => s && s.brand);
-  const invitedEnriched = (invitedSessions || []).map(enrichSession).filter(s => s && s.brand);
-  const visibleSessions = [...publicSessions, ...invitedEnriched];
+  const publicSessions = useMemo(() => (pub?.sessions || []).map(enrichSession).filter(s => s && s.brand), [pub]);
+  const invitedEnriched = useMemo(() => (invitedSessions || []).map(enrichSession).filter(s => s && s.brand), [invitedSessions]);
+  const visibleSessions = useMemo(() => [...publicSessions, ...invitedEnriched], [publicSessions, invitedEnriched]);
 
   // 価格レンジの判定
   const matchesPrice = (price) => {
@@ -1202,6 +1203,23 @@ function CustomerView({ brandFilter, setBrandFilter }) {
       return true;
     });
   }, [filter, visibleSessions, searchQuery, priceRange, priceMin, priceMax, dateFrom, dateTo, sessionCounts, bookings]);
+
+  // ◯した日が確定した会＝自分が日程調整で「参加できる(yes)」と答えた候補日の確定会。ホーム上部に優先表示。
+  const myYesSessions = useMemo(() => {
+    if (!isLoggedIn) return [];
+    const today = todayISO();
+    const booked = new Set((bookings || []).filter(b => !b.cancelled).map(b => b.sessionId));
+    return visibleSessions
+      .filter(s => {
+        if (s.fromPollId == null || s.fromPollIndex == null) return false;
+        const r = responses.find(rr => rr.pollId === s.fromPollId);
+        if (!r || !r.answers || r.answers[s.fromPollIndex] !== 'yes') return false;
+        if (s.date < today) return false; // 過去は出さない
+        if ((sessionCounts[s.id] ?? 0) >= s.capacity && !booked.has(s.id)) return false; // 満員（未予約）は出さない
+        return true;
+      })
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  }, [isLoggedIn, visibleSessions, responses, sessionCounts, bookings]);
 
   // 適用中のフィルタ数（リセットボタン表示用）
   const activeFilterCount = (
@@ -1366,6 +1384,34 @@ function CustomerView({ brandFilter, setBrandFilter }) {
       </section>
         );
       })()}
+
+      {/* ◯した日が決まった会：自分が「参加できる」と答えた候補日の確定会を最優先で表示 */}
+      {myYesSessions.length > 0 && (
+        <section className="fadeup" style={{
+          marginBottom: 28, padding: '16px 18px', borderRadius: 14,
+          background: 'linear-gradient(135deg, #e9f5ee 0%, #f3faf5 100%)', border: '1.5px solid #b8e0c8',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <CheckCircle2 size={16} color="#4a9968" />
+            <span className="maru" style={{ fontSize: 15, fontWeight: 900, color: '#2c3140' }}>あなたが参加できる日が決まりました</span>
+          </div>
+          <div style={{ fontSize: 11, color: '#6b6e7a', marginBottom: 14 }}>
+            日程調整で「参加できる」と答えた会が開催決定しました。下のカードから予約できます。
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 }}>
+            {myYesSessions.map((s, i) => (
+              <SessionCard
+                key={s.id}
+                session={s}
+                count={countOf(s.id)}
+                isBooked={bookedSessionIds.has(s.id)}
+                onClick={() => { setSelected(s); setStep('detail'); }}
+                delay={i * 50}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 2大ブランド・タブ式フィルタ */}
       <section style={{ marginBottom: 24 }}>

@@ -64,6 +64,9 @@ function toPublicSession(s) {
     customPrice: s.customPrice ?? null,
     capacity: meta.capacity ?? null,
     status: s.status,
+    // 日程調整由来の会（◯回答との突合・優先表示用）。非機密のみ公開
+    fromPollId: s.fromPollId || null,
+    fromPollIndex: typeof s.fromPollIndex === 'number' ? s.fromPollIndex : null,
   };
 }
 function toPublicPoll(p) {

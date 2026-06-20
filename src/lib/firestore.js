@@ -226,3 +226,24 @@ export async function commitPollConfirmation({ sessions, pollId, pollPatch }) {
     tx.update(pollRef, clean(pollPatch));
   });
 }
+
+// =====================================================================
+// 運営者向け通知メタ（⑤更新通知）。adminMeta/notifications の1ドキュメントだけ。
+//   paymentsSeenAt: 運営者が「参加者・支払い」タブを最後に見た時刻（'YYYY-MM-DD HH:mm'）。
+//   未確認件数はクライアントが participants の cancelledAt/reportedAt と比較して算出する。
+//   admin 専用（firestore.rules で admin のみ全許可）。
+// =====================================================================
+const ADMIN_META_COL = 'adminMeta';
+const NOTIFICATIONS_DOC = 'notifications';
+
+export function subscribeAdminMeta(onChange, onError) {
+  return onSnapshot(
+    doc(db, ADMIN_META_COL, NOTIFICATIONS_DOC),
+    (snap) => onChange(snap.exists() ? snap.data() : null),
+    onError,
+  );
+}
+
+export async function setPaymentsSeen(stamp) {
+  await setDoc(doc(db, ADMIN_META_COL, NOTIFICATIONS_DOC), { paymentsSeenAt: stamp }, { merge: true });
+}

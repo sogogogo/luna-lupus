@@ -16,6 +16,7 @@ import {
   subscribePollResponses, removePollResponse, seedPollResponses,
   subscribeAnnouncements, addAnnouncement, seedAnnouncements,
   commitPollConfirmation,
+  subscribeAdminMeta, setPaymentsSeen,
 } from './lib/firestore';
 // =====================================================================
 // ブランドアイコン（base64 PNG・お客さん提供）
@@ -3701,7 +3702,7 @@ function BottomNav({ items }) {
 }
 
 // ============ スマホ用：管理画面の全機能ドロワー（右からスライド・第2段階）============
-function AdminMenuDrawer({ open, onClose, tabs, current, onSelect }) {
+function AdminMenuDrawer({ open, onClose, tabs, current, onSelect, dotTabs = [] }) {
   if (!open) return null;
   return (
     <div onClick={onClose} style={{
@@ -3728,6 +3729,7 @@ function AdminMenuDrawer({ open, onClose, tabs, current, onSelect }) {
                 fontSize: 13, fontWeight: 700, marginBottom: 2,
               }}>
                 <Icon size={16} /> <span style={{ flex: 1 }}>{t.label}</span>
+                {dotTabs.includes(t.id) && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#e8645f' }} />}
                 {PHASE_NOTES[t.id] && <PhaseBadge kind={PHASE_NOTES[t.id].kind} />}
               </button>
             );
@@ -3738,11 +3740,98 @@ function AdminMenuDrawer({ open, onClose, tabs, current, onSelect }) {
   );
 }
 
+// ============ 運営者向け 通知ベル（⑤更新通知）============
+// 控えめに：ベル＋小さな赤バッジ（総数）。クリックで内訳ポップオーバー。
+function NotifBell({ cancels, reports, onOpenPayments }) {
+  const [open, setOpen] = useState(false);
+  const total = cancels + reports;
+  const line = (color, label, count) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, fontSize: 12, color: '#2c3140' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: color }} /> {label}</span>
+      <span className="num" style={{ fontWeight: 700, color }}>{count} 件</span>
+    </div>
+  );
+  return (
+    <div style={{ position: 'relative', flexShrink: 0 }}>
+      <button onClick={() => setOpen(o => !o)} aria-label="通知" style={{
+        position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: 38, height: 38, borderRadius: 10, border: '1px solid #e0ddd6', background: '#fff',
+        cursor: 'pointer', color: total > 0 ? '#2c3140' : '#9499a8',
+      }}>
+        <Bell size={17} />
+        {total > 0 && (
+          <span className="num" style={{
+            position: 'absolute', top: -5, right: -5, minWidth: 17, height: 17, padding: '0 4px',
+            borderRadius: 999, background: '#e8645f', color: '#fff', fontSize: 10, fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>{total}</span>
+        )}
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 140 }} />
+          <div style={{
+            position: 'absolute', right: 0, top: 46, zIndex: 150, width: 244,
+            background: '#fff', border: '1px solid #e8e5dd', borderRadius: 12,
+            boxShadow: '0 8px 28px rgba(0,0,0,0.12)', padding: 14,
+          }}>
+            <div className="maru" style={{ fontSize: 13, fontWeight: 900, color: '#2c3140', marginBottom: 10 }}>未確認のお知らせ</div>
+            {total === 0 ? (
+              <div style={{ fontSize: 12, color: '#9499a8' }}>新しい未確認の項目はありません</div>
+            ) : (
+              <>
+                <div style={{ display: 'grid', gap: 9, marginBottom: 12 }}>
+                  {line('#c9962a', '入金確認待ち', reports)}
+                  {line('#d44a4a', 'キャンセル', cancels)}
+                </div>
+                <button onClick={() => { setOpen(false); onOpenPayments(); }} style={{
+                  width: '100%', padding: 9, background: '#2c3140', color: '#fff', border: 'none',
+                  borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+                }}>参加者・支払いを開く</button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function AdminView({ sessions, participants, updateParticipant, updateSession, addSession, deleteSession, schedulePolls, pollResponses, addSchedulePoll, updateSchedulePoll, deleteSchedulePoll, announceHistory, addAnnounce }) {
   const [tab, setTab] = useState('dashboard');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // ⑤更新通知：運営者が「参加者・支払い」を最後に見た時刻（adminMeta/notifications）と未確認件数
+  const [paymentsSeenAt, setPaymentsSeenAt] = useState(null);
+  const seenInitRef = useRef(false);
+  useEffect(() => {
+    const unsub = subscribeAdminMeta((data) => {
+      if (data && data.paymentsSeenAt) {
+        setPaymentsSeenAt(data.paymentsSeenAt);
+      } else if (!seenInitRef.current) {
+        // ドキュメント未作成 → 今で初期化（過去の履歴がいきなり大量バッジ化するのを防ぐ）
+        seenInitRef.current = true;
+        const stamp = nowISO();
+        setPaymentsSeenAt(stamp);
+        setPaymentsSeen(stamp).catch(() => {});
+      }
+    }, () => {});
+    return () => unsub();
+  }, []);
+  // 「参加者・支払い」タブを開いたら既読（paymentsSeenAt=今）を永続化。
+  // ローカル state は購読エコーで更新（同期 setState を避ける）。表示中は下の onPayments で即0表示。
+  useEffect(() => {
+    if (tab !== 'payments') return;
+    setPaymentsSeen(nowISO()).catch(() => {});
+  }, [tab]);
+  // 表示中の「参加者・支払い」タブでは見ている＝バッジ0（既読が反映されるまでの間も即0）
+  const onPayments = tab === 'payments';
+  const seen = paymentsSeenAt || '';
+  const ready = paymentsSeenAt != null && !onPayments;
+  const unconfirmedCancels = ready ? participants.filter(p => p.cancelledAt && p.cancelledAt > seen).length : 0;
+  const unconfirmedReports = ready ? participants.filter(p => p.paymentStatus === 'reported' && p.reportedAt && p.reportedAt > seen).length : 0;
+  const notifTotal = unconfirmedCancels + unconfirmedReports;
   // 役職割り振りは専用アプリ『人狼会CAST』へ分離。当タブは案内パネルのみ表示（PhaseNote external）。
   const adminTabs = [
     { id: 'dashboard', label: 'ダッシュボード', icon: TrendingUp },
@@ -3757,7 +3846,7 @@ function AdminView({ sessions, participants, updateParticipant, updateSession, a
   // スマホ下部ナビは主要4項目（残り3項目は右上「メニュー」ドロワーから）
   const bottomItems = ['dashboard', 'sessions', 'payments', 'schedule'].map(id => {
     const t = adminTabs.find(x => x.id === id);
-    return { key: id, label: t.label.replace('参加者・', ''), icon: t.icon, active: tab === id, onClick: () => go(id) };
+    return { key: id, label: t.label.replace('参加者・', ''), icon: t.icon, active: tab === id, onClick: () => go(id), dot: id === 'payments' && notifTotal > 0 };
   });
   const activeTab = adminTabs.find(t => t.id === tab);
 
@@ -3771,27 +3860,37 @@ function AdminView({ sessions, participants, updateParticipant, updateSession, a
             <span className="maru" style={{ fontSize: 16, fontWeight: 900, color: '#2c3140', whiteSpace: 'nowrap' }}>{activeTab?.label}</span>
             {PHASE_NOTES[tab] && <PhaseBadge kind={PHASE_NOTES[tab].kind} />}
           </div>
-          <button onClick={() => setDrawerOpen(true)} aria-label="メニュー" style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5, padding: '8px 12px',
-            background: '#fff', border: '1px solid #e0ddd6', borderRadius: 8,
-            color: '#2c3140', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
-          }}><Menu size={15} /> メニュー</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <NotifBell cancels={unconfirmedCancels} reports={unconfirmedReports} onOpenPayments={() => go('payments')} />
+            <button onClick={() => setDrawerOpen(true)} aria-label="メニュー" style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, padding: '8px 12px',
+              background: '#fff', border: '1px solid #e0ddd6', borderRadius: 8,
+              color: '#2c3140', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+            }}><Menu size={15} /> メニュー</button>
+          </div>
         </div>
       ) : (
-        <div className="resp-tabs" style={{ display: 'flex', gap: 2, marginBottom: 24, borderBottom: '1px solid #e8e5dd', overflowX: 'auto' }}>
-          {adminTabs.map(t => {
-            const Icon = t.icon;
-            const active = tab === t.id;
-            return (
-              <button key={t.id} onClick={() => go(t.id)} style={{
-                padding: '11px 16px', background: 'transparent', border: 'none',
-                color: active ? '#2c3140' : '#9499a8',
-                borderBottom: `2px solid ${active ? '#2c3140' : 'transparent'}`,
-                cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
-                display: 'flex', alignItems: 'center', gap: 6, marginBottom: -1, whiteSpace: 'nowrap',
-              }}><Icon size={13} /> {t.label}{PHASE_NOTES[t.id] && <PhaseBadge kind={PHASE_NOTES[t.id].kind} />}</button>
-            );
-          })}
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: 12, marginBottom: 24, borderBottom: '1px solid #e8e5dd' }}>
+          <div className="resp-tabs" style={{ flex: 1, display: 'flex', gap: 2, overflowX: 'auto' }}>
+            {adminTabs.map(t => {
+              const Icon = t.icon;
+              const active = tab === t.id;
+              return (
+                <button key={t.id} onClick={() => go(t.id)} style={{
+                  padding: '11px 16px', background: 'transparent', border: 'none',
+                  color: active ? '#2c3140' : '#9499a8',
+                  borderBottom: `2px solid ${active ? '#2c3140' : 'transparent'}`,
+                  cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', gap: 6, marginBottom: -1, whiteSpace: 'nowrap',
+                }}><Icon size={13} /> {t.label}{PHASE_NOTES[t.id] && <PhaseBadge kind={PHASE_NOTES[t.id].kind} />}
+                  {t.id === 'payments' && notifTotal > 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#e8645f', marginLeft: 2 }} />}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', paddingBottom: 6 }}>
+            <NotifBell cancels={unconfirmedCancels} reports={unconfirmedReports} onOpenPayments={() => go('payments')} />
+          </div>
         </div>
       )}
 
@@ -3809,7 +3908,7 @@ function AdminView({ sessions, participants, updateParticipant, updateSession, a
         : <CustomersAdmin onSelect={setSelectedCustomer} />)}
 
       {isMobile && <BottomNav items={bottomItems} />}
-      {isMobile && <AdminMenuDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} tabs={adminTabs} current={tab} onSelect={go} />}
+      {isMobile && <AdminMenuDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} tabs={adminTabs} current={tab} onSelect={go} dotTabs={notifTotal > 0 ? ['payments'] : []} />}
     </div>
   );
 }
